@@ -1,0 +1,10 @@
+sudo: required # Required for having a RabbitMQ instance started
+
+language: python
+
+install: "pip install -r requirements.txt"
+
+script: "echo TODO"
+
+services:
+  - rabbitmq
