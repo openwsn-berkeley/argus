@@ -5,6 +5,7 @@ import pika
 
 RMQ_EXCHANGE = "beamlogic_sniffer"
 RMQ_ROUTING_KEY = "packet"
+RMQ_HOST = "localhost"
 
 # In case it complains, you can use
 
@@ -13,7 +14,7 @@ RMQ_ROUTING_KEY = "packet"
 proc = subprocess.Popen(['./adaptor', '-i', '4'],
                         stdout=subprocess.PIPE)
 
-connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
+connection = pika.BlockingConnection(pika.ConnectionParameters(host=RMQ_HOST))
 channel = connection.channel()
 
 channel.exchange_declare(exchange=RMQ_EXCHANGE, type='topic')
