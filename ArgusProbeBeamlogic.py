@@ -55,7 +55,21 @@ class SnifferThread(threading.Thread):
     '''
     Thread which attaches to the sniffer and parses incoming frames.
     '''
-    def __init__(self):
+    
+    LEN_GLOBAL_HEADER = 24 # 4+2+2+4+4+4+4
+    LEN_PACKET_HEADER = 16 # 4+4+4+4
+    
+    def __init__(self,publishThread):
+        
+        # store params
+        self.publishThread             = publishThread
+        
+        # local variables
+        self.dataLock                  = threading.Lock()
+        self.rxBuffer                  = []
+        self.doneReceivingGlobalHeader = False
+        self.doneReceivingPacketHeader = False
+        self.incl_len                  = None
         
         # start the thread
         threading.Thread.__init__(self)
@@ -76,11 +90,51 @@ class SnifferThread(threading.Thread):
         '''
         Just received a byte from the sniffer
         '''
-        print ' {0:02x}'.format(ord(b)),
+        with self.dataLock:
+            self.rxBuffer += [b]
+            
+            # global header
+            if   not self.doneReceivingGlobalHeader:
+                if len(self.rxBuffer)==self.LEN_GLOBAL_HEADER:
+                    self.doneReceivingGlobalHeader    = True
+                    self.rxBuffer                     = []
+            
+            # packet header
+            elif not self.doneReceivingGlobalHeader:
+                if len(self.rxBuffer)==self.LEN_PACKET_HEADER:
+                    self.doneReceivingPacketHeader    = True
+                    self.incl_len                     = self._extractInclLen(self.rxBuffer)
+                    self.rxBuffer                     = []
+            
+            # packet data
+            else:
+                if len(self.rxBuffer)==self.incl_len:
+                    self.doneReceivingPacketHeader    = False
+                    self._newFrame(self.rxBuffer)
+                    self.rxBuffer                     = []
     
-    def _newFrame(self,b):
+    def _extractInclLen(self,header):
+        '''
+        Extract the incl_len field from a PCAP packet header
+        '''
+        assert len(header)==self.LEN_PACKET_HEADER
+        
+        raise NotImplementedError()
+    
+    def _newFrame(self,frame):
         '''
         Just received a full frame from the sniffer
+        '''
+        
+        # transform frame
+        frame = self._transformFrame(frame)
+        
+        # publish frame
+        self.publishThread.publishFrame(self.rxBuffer)
+    
+    def _transformFrame(self,frame):
+        '''
+        Replace BeamLogic header by ZEP header.
         '''
         raise NotImplementedError()
 
@@ -101,8 +155,9 @@ def main():
     # parse parameters
     
     # start thread
-    SnifferThread()
-    CliThread()
+    publishThread = PublishThread()
+    snifferThread = SnifferThread(publishThread)
+    cliThread     = CliThread()
 
 #============================ main ============================================
 
