@@ -5,6 +5,8 @@ http://www.beamlogic.com/products/802154-site-analyzer.aspx
 
 import threading
 
+import ArgusVersion
+
 class AppData(object):
     pass
 
@@ -54,7 +56,11 @@ class SnifferThread(threading.Thread):
     Thread which attaches to the sniffer and parses incoming frames.
     '''
     def __init__(self):
-        pass
+        
+        # start the thread
+        threading.Thread.__init__(self)
+        self.name            = 'SnifferThread'
+        self.start()
     
     def run(self):
         with open(r'\\.\pipe\analyzer', 'rb') as sniffer:
@@ -78,13 +84,27 @@ class SnifferThread(threading.Thread):
         '''
         raise NotImplementedError()
 
+class CliThread(object):
+    def __init__(self):
+        print 'ArgusProbeBeamLogic {0}.{1}.{2}.{3} - (c) OpenWSN project'.format(
+            ArgusVersion.VERSION[0],
+            ArgusVersion.VERSION[1],
+            ArgusVersion.VERSION[2],
+            ArgusVersion.VERSION[3],
+        )
+        
+        while True:
+            input = raw_input('>')
+            print input
+
 def main():
     # parse parameters
     
     # start thread
     SnifferThread()
+    CliThread()
 
 #============================ main ============================================
 
 if __name__=="__main__":
-    main():
+    main()

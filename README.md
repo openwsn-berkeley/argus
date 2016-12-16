@@ -29,6 +29,8 @@ At the Argus client:
 * Start Wireshark on your loopback interface
 
 At the Argus probe:
+* start `SiteAnalyzerAdapter.exe`
+* close Wireshark
 * `python ArgusProbeBeamlogic.py` _(or double-click)_
 * Enter the nickname of the probe
 
