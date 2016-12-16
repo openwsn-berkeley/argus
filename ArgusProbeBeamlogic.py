@@ -3,6 +3,7 @@ Argus probe for the Beamlogic Site Analyzer Lite
 http://www.beamlogic.com/products/802154-site-analyzer.aspx
 '''
 
+import time
 import threading
 
 import ArgusVersion
@@ -56,8 +57,9 @@ class SnifferThread(threading.Thread):
     Thread which attaches to the sniffer and parses incoming frames.
     '''
     
-    LEN_GLOBAL_HEADER = 24 # 4+2+2+4+4+4+4
-    LEN_PACKET_HEADER = 16 # 4+4+4+4
+    GLOBAL_HEADER_LEN = 24 # 4+2+2+4+4+4+4
+    PACKET_HEADER_LEN = 16 # 4+4+4+4
+    PIPE_SNIFFER      = r'\\.\pipe\analyzer'
     
     def __init__(self,publishThread):
         
@@ -77,10 +79,19 @@ class SnifferThread(threading.Thread):
         self.start()
     
     def run(self):
-        with open(r'\\.\pipe\analyzer', 'rb') as sniffer:
-            while True:
-                b = sniffer.read(1)
-                self._newByte(b)
+        time.sleep(1) # let the banners print
+        while True:
+            try:
+                with open(self.PIPE_SNIFFER, 'rb') as sniffer:
+                    while True:
+                        b = sniffer.read(1)
+                        self._newByte(b)
+            except (IOError,TypeError):
+                print "WARNING: Could not read from pipe at \"{0}\".".format(
+                    self.PIPE_SNIFFER
+                )
+                print "Is SiteAnalyzerAdapter running?"
+                time.sleep(1)
     
     #======================== public ==========================================
     
@@ -90,18 +101,20 @@ class SnifferThread(threading.Thread):
         '''
         Just received a byte from the sniffer
         '''
+        print '{0:02x}'.format(ord(b)),
+        return
         with self.dataLock:
             self.rxBuffer += [b]
             
             # global header
             if   not self.doneReceivingGlobalHeader:
-                if len(self.rxBuffer)==self.LEN_GLOBAL_HEADER:
+                if len(self.rxBuffer)==self.GLOBAL_HEADER_LEN:
                     self.doneReceivingGlobalHeader    = True
                     self.rxBuffer                     = []
             
             # packet header
             elif not self.doneReceivingGlobalHeader:
-                if len(self.rxBuffer)==self.LEN_PACKET_HEADER:
+                if len(self.rxBuffer)==self.PACKET_HEADER_LEN:
                     self.doneReceivingPacketHeader    = True
                     self.incl_len                     = self._extractInclLen(self.rxBuffer)
                     self.rxBuffer                     = []
@@ -117,7 +130,7 @@ class SnifferThread(threading.Thread):
         '''
         Extract the incl_len field from a PCAP packet header
         '''
-        assert len(header)==self.LEN_PACKET_HEADER
+        assert len(header)==self.PACKET_HEADER_LEN
         
         raise NotImplementedError()
     
