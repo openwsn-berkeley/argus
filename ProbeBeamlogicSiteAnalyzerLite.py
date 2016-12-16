@@ -10,7 +10,7 @@ class AppData(object):
 
 class PublishThread(threading.Thread):
     '''
-    Thread which publishes sniffed frames to the broker
+    Thread which publishes sniffed frames to the broker.
     '''
     def __init__(self):
         pass
@@ -51,7 +51,7 @@ class PublishThread(threading.Thread):
 
 class SnifferThread(threading.Thread):
     '''
-    Thread which attaches to the sniffer and parses incoming frames
+    Thread which attaches to the sniffer and parses incoming frames.
     '''
     def __init__(self):
         pass

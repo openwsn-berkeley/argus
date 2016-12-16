@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+'''
+Argus client script which attaches to the broker and sends
+sniffed packets to some IP address using ZEP encapsulation.
+'''
 
 import pika
 import sys
