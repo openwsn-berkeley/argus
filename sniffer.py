@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+with open(r'\\.\pipe\analyzer', 'rb') as sniffer:
+    while True:
+        b = sniffer.read(1)
+        print ' {0:02x}'.format(ord(b)),
+
 import subprocess
 import pika
 
