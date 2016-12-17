@@ -9,81 +9,36 @@ import socket
 import threading
 import json
 import Queue
+import traceback
 
 import paho.mqtt.publish
 
 import ArgusVersion
 
-class AppData(object):
-    pass
+#============================ helpers =========================================
 
-class PublishThread(threading.Thread):
-    '''
-    Thread which publishes sniffed frames to the MQTT broker.
-    '''
-    
-    MQTT_BROKER_HOST    = 'broker.hivemq.com'
-    MQTT_BROKER_PORT    = 1883
-    MQTT_BROKER_TOPIC   = 'daumesnil'
-    
-    def __init__(self):
-        
-        # local variables
-        self.txQueue         = Queue.Queue(maxsize=10)
-        
-        # start the thread
-        threading.Thread.__init__(self)
-        self.name            = 'SnifferThread'
-        self.start()
-    
-    def run(self):
-        try:
-            while True:
-                # wait for first packet
-                msgs = [self.txQueue.get(),]
-                
-                # get other packets (if any)
-                try:
-                    while True:
-                        msgs += [self.txQueue.get(block=False)]
-                except Queue.Empty:
-                    pass
-                
-                # add topic
-                msgs = [
-                    {
-                        'topic':       'argus/{0}'.format(self.MQTT_BROKER_TOPIC),
-                        'payload':     m,
-                    } for m in msgs
-                ]
-                
-                # publish
-                paho.mqtt.publish.multiple(
-                    msgs,
-                    hostname     = self.MQTT_BROKER_HOST,
-                    port         = self.MQTT_BROKER_PORT,
-                )
-                
-        except Exception as err:
-            print err
-    
-    #======================== public ==========================================
-    
-    def publishFrame(self,frame):
-        msg = {
-            'description':   'zep',
-            'device':        'Beamlogic',
-            'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
-        }
-        try:
-            self.txQueue.put(json.dumps(msg),block=False)
-        except Queue.Full:
-            print "WARNING transmit queue to MQTT broker full. Dropping packet."
-    
-    #======================== private =========================================
-    
+def currentUtcTime():
+    return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
 
-class SnifferThread(threading.Thread):
+def logCrash(threadName,err):
+    output  = []
+    output += ["============================================================="]
+    output += [currentUtcTime()]
+    output += [""]
+    output += ["CRASH in Thread {0}!".format(threadName)]
+    output += [""]
+    output += ["=== exception type ==="]
+    output += [str(type(err))]
+    output += [""]
+    output += ["=== traceback ==="]
+    output += [traceback.format_exc()]
+    output  = '\n'.join(output)
+    
+    print output
+
+#============================ classes =========================================
+
+class RxSnifferThread(threading.Thread):
     '''
     Thread which attaches to the sniffer and parses incoming frames.
     '''
@@ -93,10 +48,10 @@ class SnifferThread(threading.Thread):
     BEAMLOGIC_HEADER_LEN     = 18 # 8+1+1+4+4
     PIPE_SNIFFER             = r'\\.\pipe\analyzer'
     
-    def __init__(self,publishThread):
+    def __init__(self,txMqttThread):
         
         # store params
-        self.publishThread             = publishThread
+        self.txMqttThread             = txMqttThread
         
         # local variables
         self.dataLock                  = threading.Lock()
@@ -106,23 +61,26 @@ class SnifferThread(threading.Thread):
         
         # start the thread
         threading.Thread.__init__(self)
-        self.name            = 'SnifferThread'
+        self.name            = 'RxSnifferThread'
         self.start()
     
     def run(self):
-        time.sleep(1) # let the banners print
-        while True:
-            try:
-                with open(self.PIPE_SNIFFER, 'rb') as sniffer:
-                    while True:
-                        b = ord(sniffer.read(1))
-                        self._newByte(b)
-            except (IOError):
-                print "WARNING: Could not read from pipe at \"{0}\".".format(
-                    self.PIPE_SNIFFER
-                )
-                print "Is SiteAnalyzerAdapter running?"
-                time.sleep(1)
+        try:
+            time.sleep(1) # let the banners print
+            while True:
+                try:
+                    with open(self.PIPE_SNIFFER, 'rb') as sniffer:
+                        while True:
+                            b = ord(sniffer.read(1))
+                            self._newByte(b)
+                except (IOError):
+                    print "WARNING: Could not read from pipe at \"{0}\".".format(
+                        self.PIPE_SNIFFER
+                    )
+                    print "Is SiteAnalyzerAdapter running?"
+                    time.sleep(1)
+        except Exception as err:
+            logCrash(self.name,err)
     
     #======================== public ==========================================
     
@@ -135,13 +93,13 @@ class SnifferThread(threading.Thread):
         with self.dataLock:
             self.rxBuffer += [b]
             
-            # global header
+            # PCAP global header
             if   not self.doneReceivingGlobalHeader:
                 if len(self.rxBuffer)==self.PCAP_GLOBALHEADER_LEN:
                     self.doneReceivingGlobalHeader    = True
                     self.rxBuffer                     = []
             
-            # packet header
+            # PCAP packet header
             elif not self.doneReceivingPacketHeader:
                 if len(self.rxBuffer)==self.PCAP_PACKETHEADER_LEN:
                     self.doneReceivingPacketHeader    = True
@@ -149,7 +107,7 @@ class SnifferThread(threading.Thread):
                     assert self.packetHeader['incl_len']==self.packetHeader['orig_len']
                     self.rxBuffer                     = []
             
-            # packet data
+            # PCAP packet bytes
             else:
                 if len(self.rxBuffer)==self.packetHeader['incl_len']:
                     self.doneReceivingPacketHeader    = False
@@ -191,7 +149,7 @@ class SnifferThread(threading.Thread):
         frame = self._transformFrame(frame)
         
         # publish frame
-        self.publishThread.publishFrame(frame)
+        self.txMqttThread.publishFrame(frame)
     
     def _transformFrame(self,frame):
         '''
@@ -211,7 +169,7 @@ class SnifferThread(threading.Thread):
     
     def _parseBeamlogicHeader(self,header):
         '''
-        Parse a Beamlogic packet header
+        Parse a Beamlogic header
         
         uint64    TimeStamp
         uint8     Channel
@@ -250,28 +208,97 @@ class SnifferThread(threading.Thread):
             length,
         ]
 
+class TxMqttThread(threading.Thread):
+    '''
+    Thread which publishes sniffed frames to the MQTT broker.
+    '''
+    
+    MQTT_BROKER_HOST    = 'iot.eclipse.org'
+    MQTT_BROKER_PORT    = 1883
+    MQTT_BROKER_TOPIC   = 'daumesnil'
+    
+    def __init__(self):
+        
+        # local variables
+        self.txQueue         = Queue.Queue(maxsize=100)
+        
+        # start the thread
+        threading.Thread.__init__(self)
+        self.name            = 'TxMqttThread'
+        self.start()
+    
+    def run(self):
+        try:
+            while True:
+                # wait for first frame
+                msgs = [self.txQueue.get(),]
+                
+                # get other frames (if any)
+                try:
+                    while True:
+                        msgs += [self.txQueue.get(block=False)]
+                except Queue.Empty:
+                    pass
+                
+                # add topic
+                msgs = [
+                    {
+                        'topic':       'argus/{0}'.format(self.MQTT_BROKER_TOPIC),
+                        'payload':     m,
+                    } for m in msgs
+                ]
+                
+                # publish
+                paho.mqtt.publish.multiple(
+                    msgs,
+                    hostname     = self.MQTT_BROKER_HOST,
+                    port         = self.MQTT_BROKER_PORT,
+                )
+                
+        except Exception as err:
+            logCrash(self.name,err)
+    
+    #======================== public ==========================================
+    
+    def publishFrame(self,frame):
+        msg = {
+            'description':   'zep',
+            'device':        'Beamlogic',
+            'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
+        }
+        try:
+            self.txQueue.put(json.dumps(msg),block=False)
+        except Queue.Full:
+            print "WARNING transmit queue to MQTT broker full. Dropping frame."
+    
+    #======================== private =========================================
+    
+
 class CliThread(object):
     def __init__(self):
-        print 'ArgusProbe (BeamLogic device) {0}.{1}.{2}.{3} - (c) OpenWSN project'.format(
-            ArgusVersion.VERSION[0],
-            ArgusVersion.VERSION[1],
-            ArgusVersion.VERSION[2],
-            ArgusVersion.VERSION[3],
-        )
-        
-        while True:
-            input = raw_input('>')
-            print input,
+        try:
+            print 'ArgusProbe (for BeamLogic sniffer) {0}.{1}.{2}.{3} - (c) OpenWSN project'.format(
+                ArgusVersion.VERSION[0],
+                ArgusVersion.VERSION[1],
+                ArgusVersion.VERSION[2],
+                ArgusVersion.VERSION[3],
+            )
+            
+            while True:
+                input = raw_input('>')
+                print input,
+        except Exception as err:
+            logCrash('CliThread',err)
+
+#============================ main ============================================
 
 def main():
     # parse parameters
     
     # start thread
-    publishThread  = PublishThread()
-    snifferThread  = SnifferThread(publishThread)
-    cliThread      = CliThread()
-
-#============================ main ============================================
+    txMqttThread        = TxMqttThread()
+    rxSnifferThread     = RxSnifferThread(txMqttThread)
+    cliThread           = CliThread()
 
 if __name__=="__main__":
     main()
