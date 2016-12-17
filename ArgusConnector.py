@@ -54,3 +54,48 @@ channel.basic_consume(callback,
 	no_ack=True)
 
 channel.start_consuming()
+
+
+
+class PublishThread(threading.Thread):
+    '''
+    Thread which publishes sniffed frames to the MQTT broker.
+    '''
+    
+    MQTT_BROKER_HOST    = 'broker.hivemq.com'
+    MQTT_BROKER_PORT    = 1883
+    MQTT_BROKER_TOPIC   = 'argus/daumesnil'
+    
+    def __init__(self):
+        
+        # local variables
+        self.client = paho.mqtt.client.Client()
+        self.client.on_connect = self._mqtt_on_connect
+        self.client.on_message = self._mqtt_on_message
+        
+        # start the thread
+        threading.Thread.__init__(self)
+        self.name            = 'SnifferThread'
+        self.start()
+    
+    def run(self):
+        self.client.connect(host=self.MQTT_BROKER_HOST, port=1883, keepalive=60)
+        self.client.loop_forever()
+    
+    #======================== public ==========================================
+    
+    def publishFrame(self,frame):
+        paho.mqtt.publish.single(
+            
+        )
+        self.sock.sendto(''.join([chr(b) for b in frame]), ('8.8.8.8', self.ZEP_UDP_PORT))
+        #raise NotImplementedError()
+    
+    #======================== private =========================================
+    
+    def _mqtt_on_connect(self,client,userdata,flags,rc):
+        print("Connected to {0}, rc={1}".format(self.MQTT_BROKER_HOST,rc))
+        #self.client.subscribe(self.MQTT_BROKER_TOPIC)
+    
+    def _mqtt_on_message(self,client,userdata,msg):
+        raise SystemError()

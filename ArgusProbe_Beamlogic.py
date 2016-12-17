@@ -7,6 +7,10 @@ import time
 import struct
 import socket
 import threading
+import json
+import Queue
+
+import paho.mqtt.publish
 
 import ArgusVersion
 
@@ -15,48 +19,66 @@ class AppData(object):
 
 class PublishThread(threading.Thread):
     '''
-    Thread which publishes sniffed frames to the broker.
+    Thread which publishes sniffed frames to the MQTT broker.
     '''
     
-    ZEP_UDP_PORT = 17754
+    MQTT_BROKER_HOST    = 'broker.hivemq.com'
+    MQTT_BROKER_PORT    = 1883
+    MQTT_BROKER_TOPIC   = 'daumesnil'
     
     def __init__(self):
-        self.sock = socket.socket(
-            socket.AF_INET,       # IPv4
-            socket.SOCK_DGRAM,    # UDP
-        )
-        '''
-        RMQ_EXCHANGE = "beamlogic_sniffer"
-        RMQ_ROUTING_KEY = "packet"
-        RMQ_HOST = "localhost"
-
-        # In case it complains, you can use
-        #subprocess.call(["sudo", "rmmod", "ftdi_sio", "usbserial", "pl2303"])
-        proc = subprocess.Popen(['./adaptor', '-i', '4'],
-                                stdout=subprocess.PIPE)
-
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RMQ_HOST))
-        channel = connection.channel()
-
-        channel.exchange_declare(exchange=RMQ_EXCHANGE, type='topic')
-
-        while True:
-          line = proc.stdout.readline()
-          if line != '':
-            #the real code does filtering here
-            message =  line.rstrip()
-            channel.basic_publish(exchange=RMQ_EXCHANGE,
-                                  routing_key=RMQ_ROUTING_KEY,
-                                  body=message)
-          else:
-            break
-        '''
+        
+        # local variables
+        self.txQueue         = Queue.Queue(maxsize=10)
+        
+        # start the thread
+        threading.Thread.__init__(self)
+        self.name            = 'SnifferThread'
+        self.start()
+    
+    def run(self):
+        try:
+            while True:
+                # wait for first packet
+                msgs = [self.txQueue.get(),]
+                
+                # get other packets (if any)
+                try:
+                    while True:
+                        msgs += [self.txQueue.get(block=False)]
+                except Queue.Empty:
+                    pass
+                
+                # add topic
+                msgs = [
+                    {
+                        'topic':       'argus/{0}'.format(self.MQTT_BROKER_TOPIC),
+                        'payload':     m,
+                    } for m in msgs
+                ]
+                
+                # publish
+                paho.mqtt.publish.multiple(
+                    msgs,
+                    hostname     = self.MQTT_BROKER_HOST,
+                    port         = self.MQTT_BROKER_PORT,
+                )
+                
+        except Exception as err:
+            print err
     
     #======================== public ==========================================
     
     def publishFrame(self,frame):
-        self.sock.sendto(''.join([chr(b) for b in frame]), ('8.8.8.8', self.ZEP_UDP_PORT))
-        #raise NotImplementedError()
+        msg = {
+            'description':   'zep',
+            'device':        'Beamlogic',
+            'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
+        }
+        try:
+            self.txQueue.put(json.dumps(msg),block=False)
+        except Queue.Full:
+            print "WARNING transmit queue to MQTT broker full. Dropping packet."
     
     #======================== private =========================================
     
@@ -230,7 +252,7 @@ class SnifferThread(threading.Thread):
 
 class CliThread(object):
     def __init__(self):
-        print 'ArgusProbeBeamLogic {0}.{1}.{2}.{3} - (c) OpenWSN project'.format(
+        print 'ArgusProbe (BeamLogic device) {0}.{1}.{2}.{3} - (c) OpenWSN project'.format(
             ArgusVersion.VERSION[0],
             ArgusVersion.VERSION[1],
             ArgusVersion.VERSION[2],
@@ -239,15 +261,15 @@ class CliThread(object):
         
         while True:
             input = raw_input('>')
-            print input
+            print input,
 
 def main():
     # parse parameters
     
     # start thread
-    publishThread = PublishThread()
-    snifferThread = SnifferThread(publishThread)
-    cliThread     = CliThread()
+    publishThread  = PublishThread()
+    snifferThread  = SnifferThread(publishThread)
+    cliThread      = CliThread()
 
 #============================ main ============================================
 

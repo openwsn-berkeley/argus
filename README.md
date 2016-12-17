@@ -17,10 +17,10 @@ Share a wireless sniffer through the cloud.
     | Argus  |                |  Argus  |       |  Argus  |
     | Probe  |                | Client1 |  ...  | ClientN |
     +--------+                +---------+       +---------+
-      |                            |                 |
-  +-------+                   +---------+       +---------+
-  |sniffer|                   |Wireshark|       |Wireshark|
-  +-------+                   +---------+       +---------+
+        |                          |                 |
+    +--------+                +---------+       +---------+
+    | sniffer|                |Wireshark|       |Wireshark|
+    +--------+                +---------+       +---------+
 ```
 
 At the Argus client:
@@ -31,8 +31,8 @@ At the Argus client:
 At the Argus probe:
 * start `SiteAnalyzerAdapter.exe`
 * close Wireshark
-* `python ArgusProbeBeamlogic.py` _(or double-click)_
+* `python ArgusProbe_Beamlogic.py` _(or double-click)_
 * Enter the nickname of the probe
 
 At the Argus Broker:
-* _unmodified RabbitMQ broker_
+* _unmodified MQTT broker_
