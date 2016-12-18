@@ -23,16 +23,13 @@ Share a wireless sniffer through the cloud.
     +--------+                +---------+       +---------+
 ```
 
-At the Argus client:
-* `python ArgusClient.py` _(or double-click)_
-* Enter the nickname of the probe
-* Start Wireshark on your loopback interface
-
-At the Argus probe:
+At the Argus Probe:
 * start `SiteAnalyzerAdapter.exe`
 * close Wireshark
 * `python ArgusProbe_Beamlogic.py` _(or double-click)_
-* Enter the nickname of the probe
+
+At the Argus client:
+* `python ArgusClient.py` _(or double-click)_
 
 At the Argus Broker:
 * _unmodified MQTT broker_
