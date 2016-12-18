@@ -4,7 +4,15 @@ sniffed packets through a pipe to Wireshark.
 '''
 
 import threading
+import time
+import struct
+import traceback
+import binascii
+import json
+import subprocess
 
+import win32pipe
+import win32file
 import paho.mqtt.client
 
 import ArgusVersion
@@ -60,7 +68,7 @@ class RxMqttThread(threading.Thread):
     def run(self):
         try:
             self.mqtt.connect(host=self.MQTT_BROKER_HOST, port=1883, keepalive=60)
-            self.mqtt.loop_forever()
+            self.mqtt.loop_forever() # handles reconnects
         except Exception as err:
             logCrash(self.name,err)
     
@@ -69,28 +77,175 @@ class RxMqttThread(threading.Thread):
     #======================== private =========================================
     
     def _mqtt_on_connect(self,client,userdata,flags,rc):
-        print("Connected to {0}, rc={1}".format(self.MQTT_BROKER_HOST,rc))
+        assert rc==0
+        print("INFO: Connected to {0} MQTT broker".format(self.MQTT_BROKER_HOST))
         self.mqtt.subscribe('argus/{0}'.format(self.MQTT_BROKER_TOPIC))
     
     def _mqtt_on_message(self,client,userdata,msg):
         self.txWiresharkThread.publish(msg.payload)
 
-class TxWiresharkThread(object):
+class TxWiresharkThread(threading.Thread):
     '''
-    Thread which publishes sniffed frames to the MQTT broker.
+    Thread which publishes sniffed frames to Wireshark broker.
     '''
     
-    PIPE_WIRESHARK      = r'\\.\pipe\argus'
+    PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
     
-    def _init__(self):
-        pass
+    def __init__(self):
+        
+        # local variables
+        self.dataLock             = threading.Lock()
+        self.reconnectToPipeEvent = threading.Event()
+        self.reconnectToPipeEvent.clear()
+        self.wiresharkConnected   = False
+        
+        # start the thread
+        threading.Thread.__init__(self)
+        self.name                 = 'TxWiresharkThread'
+        self.start()
+    
+    def run(self):
+        try:
+            
+            # create pipe
+            self.pipe = win32pipe.CreateNamedPipe(
+                self.PIPE_NAME_WIRESHARK,
+                win32pipe.PIPE_ACCESS_OUTBOUND,
+                win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,
+                1, 65536, 65536,
+                300,
+                None,
+            )
+            
+            while True:
+                
+                try:
+                    # connect to pipe (blocks until Wireshark appears)
+                    win32pipe.ConnectNamedPipe(self.pipe,None)
+                    
+                    # send PCAP global header to Wireshark
+                    ghdr = self._createPcapGlobalHeader()
+                    win32file.WriteFile(self.pipe,ghdr)
+                except:
+                    continue
+                else:
+                    print 'INFO: Wireshark connected'
+                    with self.dataLock:
+                        self.wiresharkConnected = True
+                    
+                    # wait until need to reconnect
+                    self.reconnectToPipeEvent.wait()
+                    self.reconnectToPipeEvent.clear()
+                finally:
+                    print 'INFO: Wireshark disconnected'
+                    with self.dataLock:
+                        self.wiresharkConnected = False
+                    
+                    # disconnect from pipe
+                    win32pipe.DisconnectNamedPipe(self.pipe)
+                
+        except Exception as err:
+            logCrash(self.name,err)
     
     #======================== public ==========================================
     
-    def publish(self,frame):
-        print frame
+    def publish(self,msg):
+        with self.dataLock:
+            if not self.wiresharkConnected:
+                # no Wireshark listening, dropping.
+                return
+        
+        zep      = binascii.unhexlify(json.loads(msg)['bytes'])
+        udp      = ''.join(
+            [
+                chr(b) for b in [
+                    0x00,0x00,              # source port
+                    0x45,0x5a,              # destination port
+                    0x00,8+len(zep),        # length
+                    0xbc,0x04,              # checksum
+                ]
+            ]
+        )
+        ipv6     = ''.join(
+            [
+                chr(b) for b in [
+                    0x60,                   # version
+                    0x00,0x00,0x00,         # traffic class
+                    0x00,len(udp)+len(zep), # payload length
+                    0x11,                   # next header (17==UDP)
+                    0x08,                   # HLIM
+                    0xbb,0xbb,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01, # src
+                    0xbb,0xbb,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01, # dest
+                ]
+            ]
+        )
+        ethernet = ''.join([chr(b) for b in [
+                    0x00,0x00,0x00,0x00,0x00,0x00,    # source
+                    0x00,0x00,0x00,0x00,0x00,0x00,    # destination
+                    0x86,0xdd,                        # type (IPv6)
+                ]
+            ]
+        )
+        
+        frame    = ''.join([ethernet,ipv6,udp,zep])
+        pcap     = self._createPcapPacketHeader(len(frame))
+        
+        try:
+            win32file.WriteFile(self.pipe,pcap+frame)
+        except:
+            self.reconnectToPipeEvent.set()
     
     #======================== private =========================================
+    
+    def _createPcapGlobalHeader(self):
+        '''
+        Create a PCAP global header.
+        
+        Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
+        
+        typedef struct pcap_hdr_s {
+            guint32 magic_number;   /* magic number */
+            guint16 version_major;  /* major version number */
+            guint16 version_minor;  /* minor version number */
+            gint32  thiszone;       /* GMT to local correction */
+            guint32 sigfigs;        /* accuracy of timestamps */
+            guint32 snaplen;        /* max length of captured packets, in octets */
+            guint32 network;        /* data link type */
+        } pcap_hdr_t;
+        '''
+        
+        return struct.pack(
+            '<IHHiIII',
+            0xa1b2c3d4, # magic_number
+            0x0002,     # version_major
+            0x0004,     # version_minor
+            0,          # thiszone
+            0x00000000, # sigfigs
+            0x0000ffff, # snaplen
+            0x00000001, # network
+        )
+    
+    def _createPcapPacketHeader(self,length):
+        '''
+        Create a PCAP global header.
+        
+        Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
+        
+        typedef struct pcaprec_hdr_s {
+            guint32 ts_sec;         /* timestamp seconds */
+            guint32 ts_usec;        /* timestamp microseconds */
+            guint32 incl_len;       /* number of octets of packet saved in file */
+            guint32 orig_len;       /* actual length of packet */
+        } pcaprec_hdr_t;
+        '''
+        
+        return struct.pack(
+            '<IIII',
+            0x00000000, # ts_sec
+            0x00000000, # ts_sec
+            length,     # incl_len
+            length,     # orig_len
+        )
 
 class CliThread(object):
     def __init__(self):
@@ -111,12 +266,19 @@ class CliThread(object):
 #============================ main ============================================
 
 def main():
-    # parse parameters
-    
-    # start thread
-    txWiresharkThread   = TxWiresharkThread()
-    rxMqttThread        = RxMqttThread(txWiresharkThread)
-    cliThread           = CliThread()
+    try:
+        # parse parameters
+        
+        # start Wireshark
+        wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe', r'-i\\.\pipe\argus','-k']
+        proc                 = subprocess.Popen(wireshark_cmd)
+        
+        # start threads
+        txWiresharkThread    = TxWiresharkThread()
+        rxMqttThread         = RxMqttThread(txWiresharkThread)
+        cliThread            = CliThread()
+    except Exception as err:
+        logCrash('main',err)
 
 if __name__=="__main__":
     main()
