@@ -249,12 +249,19 @@ class TxMqttThread(threading.Thread):
                 ]
                 
                 # publish
-                paho.mqtt.publish.multiple(
-                    msgs,
-                    hostname     = self.MQTT_BROKER_HOST,
-                    port         = self.MQTT_BROKER_PORT,
-                )
-                
+                try:
+                    paho.mqtt.publish.multiple(
+                        msgs,
+                        hostname     = self.MQTT_BROKER_HOST,
+                        port         = self.MQTT_BROKER_PORT,
+                    )
+                except Exception as err:
+                    print "WARNING publication to {0}:{1} over MQTT failed ({2})".format(
+                        self.MQTT_BROKER_HOST,
+                        self.MQTT_BROKER_PORT,
+                        str(type(err)),
+                    )
+        
         except Exception as err:
             logCrash(self.name,err)
     
