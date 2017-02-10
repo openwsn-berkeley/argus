@@ -33,7 +33,7 @@ def logCrash(threadName,err):
     output += ["=== traceback ==="]
     output += [traceback.format_exc()]
     output  = '\n'.join(output)
-    
+
     print output
 
 #============================ classes =========================================
@@ -42,28 +42,28 @@ class RxSnifferThread(threading.Thread):
     '''
     Thread which attaches to the sniffer and parses incoming frames.
     '''
-    
+
     PCAP_GLOBALHEADER_LEN    = 24 # 4+2+2+4+4+4+4
     PCAP_PACKETHEADER_LEN    = 16 # 4+4+4+4
     BEAMLOGIC_HEADER_LEN     = 18 # 8+1+1+4+4
     PIPE_SNIFFER             = r'\\.\pipe\analyzer'
-    
+
     def __init__(self,txMqttThread):
-        
+
         # store params
         self.txMqttThread             = txMqttThread
-        
+
         # local variables
         self.dataLock                  = threading.Lock()
         self.rxBuffer                  = []
         self.doneReceivingGlobalHeader = False
         self.doneReceivingPacketHeader = False
-        
+
         # start the thread
         threading.Thread.__init__(self)
         self.name            = 'RxSnifferThread'
         self.start()
-    
+
     def run(self):
         try:
             time.sleep(1) # let the banners print
@@ -81,24 +81,24 @@ class RxSnifferThread(threading.Thread):
                     time.sleep(1)
         except Exception as err:
             logCrash(self.name,err)
-    
+
     #======================== public ==========================================
-    
+
     #======================== private =========================================
-    
+
     def _newByte(self,b):
         '''
         Just received a byte from the sniffer
         '''
         with self.dataLock:
             self.rxBuffer += [b]
-            
+
             # PCAP global header
             if   not self.doneReceivingGlobalHeader:
                 if len(self.rxBuffer)==self.PCAP_GLOBALHEADER_LEN:
                     self.doneReceivingGlobalHeader    = True
                     self.rxBuffer                     = []
-            
+
             # PCAP packet header
             elif not self.doneReceivingPacketHeader:
                 if len(self.rxBuffer)==self.PCAP_PACKETHEADER_LEN:
@@ -106,20 +106,20 @@ class RxSnifferThread(threading.Thread):
                     self.packetHeader                 = self._parsePcapPacketHeader(self.rxBuffer)
                     assert self.packetHeader['incl_len']==self.packetHeader['orig_len']
                     self.rxBuffer                     = []
-            
+
             # PCAP packet bytes
             else:
                 if len(self.rxBuffer)==self.packetHeader['incl_len']:
                     self.doneReceivingPacketHeader    = False
                     self._newFrame(self.rxBuffer)
                     self.rxBuffer                     = []
-    
+
     def _parsePcapPacketHeader(self,header):
         '''
         Parse a PCAP packet header
-        
+
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
-        
+
         typedef struct pcaprec_hdr_s {
             guint32 ts_sec;         /* timestamp seconds */
             guint32 ts_usec;        /* timestamp microseconds */
@@ -127,9 +127,9 @@ class RxSnifferThread(threading.Thread):
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
         '''
-        
+
         assert len(header)==self.PCAP_PACKETHEADER_LEN
-        
+
         returnVal = {}
         (
             returnVal['ts_sec'],
@@ -137,25 +137,25 @@ class RxSnifferThread(threading.Thread):
             returnVal['incl_len'],
             returnVal['orig_len'],
         ) = struct.unpack('<IIII', ''.join([chr(b) for b in header]))
-        
+
         return returnVal
-    
+
     def _newFrame(self,frame):
         '''
         Just received a full frame from the sniffer
         '''
-        
+
         # transform frame
         frame = self._transformFrame(frame)
-        
+
         # publish frame
         self.txMqttThread.publishFrame(frame)
-    
+
     def _transformFrame(self,frame):
         '''
         Replace BeamLogic header by ZEP header.
         '''
-        
+
         beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
         ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:]
         ieee154[0] = ieee154[0] | 0x40 # fixing PAN ID compression bit (temporary)
@@ -164,22 +164,22 @@ class RxSnifferThread(threading.Thread):
             timestamp   = beamlogic['TimeStamp'],
             length      = len(ieee154),
         )
-        
+
         return zep+ieee154
-    
+
     def _parseBeamlogicHeader(self,header):
         '''
         Parse a Beamlogic header
-        
+
         uint64    TimeStamp
         uint8     Channel
         uint8     RSSI
         uint32    GpsLat
         uint32    GpsLong
         '''
-        
+
         assert len(header)==self.BEAMLOGIC_HEADER_LEN
-        
+
         returnVal = {}
         (
             returnVal['TimeStamp'],
@@ -188,9 +188,9 @@ class RxSnifferThread(threading.Thread):
             returnVal['GpsLat'],
             returnVal['GpsLong'],
         ) = struct.unpack('<QBBII', ''.join([chr(b) for b in header]))
-        
+
         return returnVal
-    
+
     def _formatZep(self,channel,timestamp,length):
         return [
             0x45,0x58,
@@ -212,34 +212,34 @@ class TxMqttThread(threading.Thread):
     '''
     Thread which publishes sniffed frames to the MQTT broker.
     '''
-    
-    MQTT_BROKER_HOST    = 'iot.eclipse.org'
+
+    MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
-    MQTT_BROKER_TOPIC   = 'daumesnil'
-    
+    MQTT_BROKER_TOPIC   = 'inria-paris/beamlogic'
+
     def __init__(self):
-        
+
         # local variables
         self.txQueue         = Queue.Queue(maxsize=100)
-        
+
         # start the thread
         threading.Thread.__init__(self)
         self.name            = 'TxMqttThread'
         self.start()
-    
+
     def run(self):
         try:
             while True:
                 # wait for first frame
                 msgs = [self.txQueue.get(),]
-                
+
                 # get other frames (if any)
                 try:
                     while True:
                         msgs += [self.txQueue.get(block=False)]
                 except Queue.Empty:
                     pass
-                
+
                 # add topic
                 msgs = [
                     {
@@ -247,7 +247,7 @@ class TxMqttThread(threading.Thread):
                         'payload':     m,
                     } for m in msgs
                 ]
-                
+
                 # publish
                 try:
                     paho.mqtt.publish.multiple(
@@ -261,12 +261,12 @@ class TxMqttThread(threading.Thread):
                         self.MQTT_BROKER_PORT,
                         str(type(err)),
                     )
-        
+
         except Exception as err:
             logCrash(self.name,err)
-    
+
     #======================== public ==========================================
-    
+
     def publishFrame(self,frame):
         msg = {
             'description':   'zep',
@@ -277,9 +277,9 @@ class TxMqttThread(threading.Thread):
             self.txQueue.put(json.dumps(msg),block=False)
         except Queue.Full:
             print "WARNING transmit queue to MQTT broker full. Dropping frame."
-    
+
     #======================== private =========================================
-    
+
 
 class CliThread(object):
     def __init__(self):
@@ -290,7 +290,7 @@ class CliThread(object):
                 ArgusVersion.VERSION[2],
                 ArgusVersion.VERSION[3],
             )
-            
+
             while True:
                 input = raw_input('>')
                 print input,
@@ -301,7 +301,7 @@ class CliThread(object):
 
 def main():
     # parse parameters
-    
+
     # start thread
     txMqttThread        = TxMqttThread()
     rxSnifferThread     = RxSnifferThread(txMqttThread)
