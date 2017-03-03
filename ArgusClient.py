@@ -296,6 +296,9 @@ def main():
         import win32file
     elif isLinux():
         import serial
+    else:
+        print("Sorry, we don't currently have support for the " + platform.system() + " OS")
+        exit()
 
     try:
         # parse parameters
