@@ -11,24 +11,19 @@ import binascii
 import json
 import subprocess
 import os
-import sys
-
-if sys.platform == "Windows":
-    import win32pipe
-    import win32file
-    PLATFORM = "W"
-elif sys.platform in ["linux2", "Linux"]:
-    import serial
-    PLATFORM = "L"
-else:
-    print("Sorry, we don't currently have support for the " + sys.platform + " OS")
-    exit()
+import platform
 
 import paho.mqtt.client
 
 import ArgusVersion
 
 #============================ helpers =========================================
+
+def isLinux():
+    return platform.system() == "Linux"
+
+def isWindows():
+    return platform.system() == "Windows"
 
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
@@ -100,9 +95,9 @@ class TxWiresharkThread(threading.Thread):
     Thread which publishes sniffed frames to Wireshark broker.
     '''
 
-    if PLATFORM == 'W':
+    if isWindows():
         PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
-    elif PLATFORM == 'L':
+    elif isLinux():
         PIPE_NAME_WIRESHARK = r'/tmp/argus'
 
     def __init__(self):
@@ -122,7 +117,7 @@ class TxWiresharkThread(threading.Thread):
         try:
 
             # create pipe
-            if PLATFORM == 'W':
+            if isWindows():
                 self.pipe = win32pipe.CreateNamedPipe(
                     self.PIPE_NAME_WIRESHARK,
                     win32pipe.PIPE_ACCESS_OUTBOUND,
@@ -131,23 +126,23 @@ class TxWiresharkThread(threading.Thread):
                     300,
                     None,
                 )
-            elif PLATFORM == 'L':
+            elif isLinux():
                 self.pipe = open(self.PIPE_NAME_WIRESHARK, 'wb')
 
             while True:
 
                 try:
                     # connect to pipe (blocks until Wireshark appears)
-                    if PLATFORM == 'W':
+                    if isWindows():
                         win32pipe.ConnectNamedPipe(self.pipe,None)
-                    elif PLATFORM == 'L':
+                    elif isLinux():
                         open(self.PIPE_NAME_WIRESHARK, 'wb')
 
                     # send PCAP global header to Wireshark
                     ghdr = self._createPcapGlobalHeader()
-                    if PLATFORM == 'W':
+                    if isWindows():
                         win32file.WriteFile(self.pipe,ghdr)
-                    elif PLATFORM == 'L':
+                    elif isLinux():
                         self.pipe.write(ghdr)
                 except:
                     continue
@@ -165,9 +160,9 @@ class TxWiresharkThread(threading.Thread):
                         self.wiresharkConnected = False
 
                     # disconnect from pipe
-                    if PLATFORM == 'W':
+                    if isWindows():
                         win32pipe.DisconnectNamedPipe(self.pipe)
-                    elif PLATFORM == 'L':
+                    elif isLinux():
                         self.pipe.close()
         except Exception as err:
             logCrash(self.name,err)
@@ -216,9 +211,9 @@ class TxWiresharkThread(threading.Thread):
         pcap     = self._createPcapPacketHeader(len(frame))
 
         try:
-            if PLATFORM == 'W':
+            if isWindows():
                 win32file.WriteFile(self.pipe,pcap+frame)
-            elif PLATFORM == 'L':
+            elif isLinux():
                 self.pipe.write(pcap+frame)
 
         except:
@@ -295,13 +290,20 @@ class CliThread(object):
 #============================ main ============================================
 
 def main():
+    # OS dependent imports
+    if isWindows():
+        import win32pipe
+        import win32file
+    elif isLinux():
+        import serial
+
     try:
         # parse parameters
 
         # start Wireshark
-        if PLATFORM == "W":
+        if isWindows():
             wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe', r'-i\\.\pipe\argus','-k']
-        elif PLATFORM == "L":
+        elif isLinux():
             fifo_name = "/tmp/argus"
             if not os.path.exists(fifo_name):
                 try:
