@@ -10,14 +10,20 @@ import traceback
 import binascii
 import json
 import subprocess
+import os
+import platform
 
-import win32pipe
-import win32file
 import paho.mqtt.client
 
 import ArgusVersion
 
 #============================ helpers =========================================
+
+def isLinux():
+    return platform.system() == "Linux"
+
+def isWindows():
+    return platform.system() == "Windows"
 
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
@@ -89,7 +95,10 @@ class TxWiresharkThread(threading.Thread):
     Thread which publishes sniffed frames to Wireshark broker.
     '''
 
-    PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
+    if isWindows():
+        PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
+    elif isLinux():
+        PIPE_NAME_WIRESHARK = r'/tmp/argus'
 
     def __init__(self):
 
@@ -108,24 +117,33 @@ class TxWiresharkThread(threading.Thread):
         try:
 
             # create pipe
-            self.pipe = win32pipe.CreateNamedPipe(
-                self.PIPE_NAME_WIRESHARK,
-                win32pipe.PIPE_ACCESS_OUTBOUND,
-                win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,
-                1, 65536, 65536,
-                300,
-                None,
-            )
+            if isWindows():
+                self.pipe = win32pipe.CreateNamedPipe(
+                    self.PIPE_NAME_WIRESHARK,
+                    win32pipe.PIPE_ACCESS_OUTBOUND,
+                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_WAIT,
+                    1, 65536, 65536,
+                    300,
+                    None,
+                )
+            elif isLinux():
+                self.pipe = open(self.PIPE_NAME_WIRESHARK, 'wb')
 
             while True:
 
                 try:
                     # connect to pipe (blocks until Wireshark appears)
-                    win32pipe.ConnectNamedPipe(self.pipe,None)
+                    if isWindows():
+                        win32pipe.ConnectNamedPipe(self.pipe,None)
+                    elif isLinux():
+                        open(self.PIPE_NAME_WIRESHARK, 'wb')
 
                     # send PCAP global header to Wireshark
                     ghdr = self._createPcapGlobalHeader()
-                    win32file.WriteFile(self.pipe,ghdr)
+                    if isWindows():
+                        win32file.WriteFile(self.pipe,ghdr)
+                    elif isLinux():
+                        self.pipe.write(ghdr)
                 except:
                     continue
                 else:
@@ -142,8 +160,10 @@ class TxWiresharkThread(threading.Thread):
                         self.wiresharkConnected = False
 
                     # disconnect from pipe
-                    win32pipe.DisconnectNamedPipe(self.pipe)
-
+                    if isWindows():
+                        win32pipe.DisconnectNamedPipe(self.pipe)
+                    elif isLinux():
+                        self.pipe.close()
         except Exception as err:
             logCrash(self.name,err)
 
@@ -191,7 +211,11 @@ class TxWiresharkThread(threading.Thread):
         pcap     = self._createPcapPacketHeader(len(frame))
 
         try:
-            win32file.WriteFile(self.pipe,pcap+frame)
+            if isWindows():
+                win32file.WriteFile(self.pipe,pcap+frame)
+            elif isLinux():
+                self.pipe.write(pcap+frame)
+
         except:
             self.reconnectToPipeEvent.set()
 
@@ -266,11 +290,32 @@ class CliThread(object):
 #============================ main ============================================
 
 def main():
+    # OS dependent imports
+    if isWindows():
+        import win32pipe
+        import win32file
+    elif isLinux():
+        import serial
+    else:
+        print("Sorry, we don't currently have support for the " + platform.system() + " OS")
+        exit()
+
     try:
         # parse parameters
 
         # start Wireshark
-        wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe', r'-i\\.\pipe\argus','-k']
+        if isWindows():
+            wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe', r'-i\\.\pipe\argus','-k']
+        elif isLinux():
+            fifo_name = "/tmp/argus"
+            if not os.path.exists(fifo_name):
+                try:
+                    os.mkfifo(fifo_name)
+                except OSError, e:
+                    print "Failed to create FIFO: {0}".format(e)
+                    exit()
+            wireshark_cmd        = ["wireshark", "-k", "-i", format(fifo_name)]
+
         proc                 = subprocess.Popen(wireshark_cmd)
 
         # start threads
