@@ -262,11 +262,11 @@ class TxWiresharkThread(threading.Thread):
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
         '''
-
+        t = time.time()
         return struct.pack(
             '<IIII',
-            0x00000000, # ts_sec
-            0x00000000, # ts_sec
+            int(t), # ts_sec
+            1000 * (t - int(t)), # ts_usec
             length,     # incl_len
             length,     # orig_len
         )
