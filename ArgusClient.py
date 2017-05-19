@@ -17,6 +17,16 @@ import paho.mqtt.client
 
 import ArgusVersion
 
+# OS dependent imports
+if isWindows():
+    import win32pipe
+    import win32file
+elif isLinux():
+    import serial
+else:
+    print("Sorry, we don't currently have support for the " + platform.system() + " OS")
+    exit()
+
 #============================ helpers =========================================
 
 def isLinux():
@@ -292,16 +302,6 @@ class CliThread(object):
 #============================ main ============================================
 
 def main():
-    # OS dependent imports
-    if isWindows():
-        import win32pipe
-        import win32file
-    elif isLinux():
-        import serial
-    else:
-        print("Sorry, we don't currently have support for the " + platform.system() + " OS")
-        exit()
-
     try:
         # parse parameters
 
