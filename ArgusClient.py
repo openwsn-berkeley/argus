@@ -144,6 +144,7 @@ class TxWiresharkThread(threading.Thread):
                         win32file.WriteFile(self.pipe,ghdr)
                     elif isLinux():
                         self.pipe.write(ghdr)
+                        self.pipe.flush()
                 except:
                     continue
                 else:
@@ -215,6 +216,7 @@ class TxWiresharkThread(threading.Thread):
                 win32file.WriteFile(self.pipe,pcap+frame)
             elif isLinux():
                 self.pipe.write(pcap+frame)
+                self.pipe.flush()
 
         except:
             self.reconnectToPipeEvent.set()
