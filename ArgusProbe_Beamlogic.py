@@ -157,7 +157,7 @@ class RxSnifferThread(threading.Thread):
         '''
 
         beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
-        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:]
+        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:-1]
         ieee154[0] = ieee154[0] | 0x40 # fixing PAN ID compression bit (temporary)
         zep        = self._formatZep(
             channel     = beamlogic['Channel'],
