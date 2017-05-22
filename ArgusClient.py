@@ -17,6 +17,12 @@ import paho.mqtt.client
 
 import ArgusVersion
 
+def isLinux():
+    return platform.system() == "Linux"
+
+def isWindows():
+    return platform.system() == "Windows"
+
 # OS dependent imports
 if isWindows():
     import win32pipe
@@ -28,12 +34,6 @@ else:
     exit()
 
 #============================ helpers =========================================
-
-def isLinux():
-    return platform.system() == "Linux"
-
-def isWindows():
-    return platform.system() == "Windows"
 
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
