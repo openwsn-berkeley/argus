@@ -1,7 +1,7 @@
-'''
+"""
 Argus client script which attaches to the broker and sends
 sniffed packets through a pipe to Wireshark.
-'''
+"""
 
 import threading
 import time
@@ -62,10 +62,10 @@ def logCrash(threadName, err):
 
 
 class RxMqttThread(threading.Thread):
-    '''
+    """
     Thread which subscribes to the MQTT broker and pushes
     received frames to he
-    '''
+    """
 
     MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
@@ -107,9 +107,9 @@ class RxMqttThread(threading.Thread):
 
 
 class TxWiresharkThread(threading.Thread):
-    '''
+    """
     Thread which publishes sniffed frames to Wireshark broker.
-    '''
+    """
 
     if isWindows():
         PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
@@ -242,7 +242,7 @@ class TxWiresharkThread(threading.Thread):
     #======================== private =========================================
 
     def _createPcapGlobalHeader(self):
-        '''
+        """
         Create a PCAP global header.
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -256,7 +256,7 @@ class TxWiresharkThread(threading.Thread):
             guint32 snaplen;        /* max length of captured packets, in octets */
             guint32 network;        /* data link type */
         } pcap_hdr_t;
-        '''
+        """
 
         return struct.pack(
             '<IHHiIII',
@@ -270,7 +270,7 @@ class TxWiresharkThread(threading.Thread):
         )
 
     def _createPcapPacketHeader(self, length):
-        '''
+        """
         Create a PCAP global header.
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -281,7 +281,7 @@ class TxWiresharkThread(threading.Thread):
             guint32 incl_len;       /* number of octets of packet saved in file */
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
-        '''
+        """
         t = time.time()
         return struct.pack(
             '<IIII',
