@@ -1,7 +1,7 @@
-'''
+"""
 Argus probe for the Beamlogic Site Analyzer Lite
 http://www.beamlogic.com/products/802154-site-analyzer.aspx
-'''
+"""
 
 import time
 import struct
@@ -42,9 +42,9 @@ def logCrash(threadName, err):
 
 
 class RxSnifferThread(threading.Thread):
-    '''
+    """
     Thread which attaches to the sniffer and parses incoming frames.
-    '''
+    """
 
     PCAP_GLOBALHEADER_LEN    = 24  # 4+2+2+4+4+4+4
     PCAP_PACKETHEADER_LEN    = 16  # 4+4+4+4
@@ -90,9 +90,9 @@ class RxSnifferThread(threading.Thread):
     #======================== private =========================================
 
     def _newByte(self, b):
-        '''
+        """
         Just received a byte from the sniffer
-        '''
+        """
         with self.dataLock:
             self.rxBuffer += [b]
 
@@ -118,7 +118,7 @@ class RxSnifferThread(threading.Thread):
                     self.rxBuffer                     = []
 
     def _parsePcapPacketHeader(self, header):
-        '''
+        """
         Parse a PCAP packet header
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -129,7 +129,7 @@ class RxSnifferThread(threading.Thread):
             guint32 incl_len;       /* number of octets of packet saved in file */
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
-        '''
+        """
 
         assert len(header) == self.PCAP_PACKETHEADER_LEN
 
@@ -144,9 +144,9 @@ class RxSnifferThread(threading.Thread):
         return returnVal
 
     def _newFrame(self, frame):
-        '''
+        """
         Just received a full frame from the sniffer
-        '''
+        """
 
         # transform frame
         frame = self._transformFrame(frame)
@@ -155,9 +155,9 @@ class RxSnifferThread(threading.Thread):
         self.txMqttThread.publishFrame(frame)
 
     def _transformFrame(self, frame):
-        '''
+        """
         Replace BeamLogic header by ZEP header.
-        '''
+        """
 
         beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
         ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:-1]
@@ -171,7 +171,7 @@ class RxSnifferThread(threading.Thread):
         return zep+ieee154
 
     def _parseBeamlogicHeader(self, header):
-        '''
+        """
         Parse a Beamlogic header
 
         uint64    TimeStamp
@@ -179,7 +179,7 @@ class RxSnifferThread(threading.Thread):
         uint8     RSSI
         uint32    GpsLat
         uint32    GpsLong
-        '''
+        """
 
         assert len(header) == self.BEAMLOGIC_HEADER_LEN
 
@@ -214,9 +214,9 @@ class RxSnifferThread(threading.Thread):
 
 
 class TxMqttThread(threading.Thread):
-    '''
+    """
     Thread which publishes sniffed frames to the MQTT broker.
-    '''
+    """
 
     MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
