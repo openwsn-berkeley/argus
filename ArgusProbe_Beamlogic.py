@@ -76,7 +76,7 @@ class RxSnifferThread(threading.Thread):
                         while True:
                             b = ord(sniffer.read(1))
                             self._newByte(b)
-                except (IOError):
+                except IOError:
                     print "WARNING: Could not read from pipe at \"{0}\".".format(
                         self.PIPE_SNIFFER
                     )
