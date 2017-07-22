@@ -161,6 +161,7 @@ class RxSnifferThread(threading.Thread):
         zep        = self._formatZep(
             channel     = beamlogic['Channel'],
             timestamp   = beamlogic['TimeStamp'],
+            rssi        = beamlogic['RSSI'],
             length      = len(ieee154),
         )
 
@@ -190,7 +191,7 @@ class RxSnifferThread(threading.Thread):
 
         return returnVal
 
-    def _formatZep(self,channel,timestamp,length):
+    def _formatZep(self,channel,timestamp,rssi,length):
         return [
             0x45,0x58,
             0x02,
@@ -203,7 +204,8 @@ class RxSnifferThread(threading.Thread):
         [ord(b) for b in struct.pack('>Q',timestamp)]+ \
         [
             0x02,0x02,0x02,0x02,
-            0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+            rssi,
+            0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
             length,
         ]
 
