@@ -303,8 +303,8 @@ class CliThread(object):
             )
 
             while True:
-                input = raw_input('> ')
-                print input,
+                user_input = raw_input('> ')
+                print user_input,
         except Exception as err:
             logCrash('CliThread', err)
 
