@@ -46,7 +46,7 @@ class RxSnifferThread(threading.Thread):
 
     PCAP_GLOBALHEADER_LEN    = 24 # 4+2+2+4+4+4+4
     PCAP_PACKETHEADER_LEN    = 16 # 4+4+4+4
-    BEAMLOGIC_HEADER_LEN     = 18 # 8+1+1+4+4
+    BEAMLOGIC_HEADER_LEN     = 20 # 1+8+1+1+4+4+1
     PIPE_SNIFFER             = r'\\.\pipe\analyzer'
 
     def __init__(self,txMqttThread):
@@ -157,12 +157,12 @@ class RxSnifferThread(threading.Thread):
         Replace BeamLogic header by ZEP header.
         '''
 
-        beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
-        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:-1]
+        beamlogic  = self._parseBeamlogicHeader(frame[:self.BEAMLOGIC_HEADER_LEN])
+        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN:-1]
         zep        = self._formatZep(
             channel         = beamlogic['Channel'],
             timestamp       = beamlogic['TimeStamp'],
-            length          = len(ieee154),
+            length          = beamlogic['Length'],
             rssi            = beamlogic['RSSI']
         )
 
@@ -183,12 +183,14 @@ class RxSnifferThread(threading.Thread):
 
         returnVal = {}
         (
+            returnVal['Reserved'],
             returnVal['TimeStamp'],
             returnVal['Channel'],
             returnVal['RSSI'],
             returnVal['GpsLat'],
             returnVal['GpsLong'],
-        ) = struct.unpack('<QBBII', ''.join([chr(b) for b in header]))
+            returnVal['Length'],
+        ) = struct.unpack('<BQBBIIB', ''.join([chr(b) for b in header]))
 
         return returnVal
 
