@@ -10,6 +10,7 @@ import threading
 import json
 import Queue
 import traceback
+import datetime
 
 import paho.mqtt.publish
 
@@ -159,9 +160,10 @@ class RxSnifferThread(threading.Thread):
         beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
         ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:-1]
         zep        = self._formatZep(
-            channel     = beamlogic['Channel'],
-            timestamp   = beamlogic['TimeStamp'],
-            length      = len(ieee154),
+            channel         = beamlogic['Channel'],
+            timestamp       = beamlogic['TimeStamp'],
+            length          = len(ieee154),
+            rssi            = beamlogic['RSSI']
         )
 
         return zep+ieee154
@@ -190,22 +192,36 @@ class RxSnifferThread(threading.Thread):
 
         return returnVal
 
-    def _formatZep(self,channel,timestamp,length):
+    def _formatZep(self, channel, timestamp, length, rssi):
         return [
-            0x45,0x58,
-            0x02,
-            0x01,
-            channel,
-            0x00,0x01,
-            0x01,
-            0xff,
-        ]+ \
-        [ord(b) for b in struct.pack('>Q',timestamp)]+ \
+            0x45, 0x58,     # Preamble
+            0x02,           # Version
+            0x01,           # Type (Data)
+            channel,        # Channel ID
+            0x00, 0x01,     # Device ID
+            0x01,           # CRC/LQI Mode
+            0xff,           # LQI Val
+        ] + \
+        [   # NTP Timestamp
+            ord(b) for b in struct.pack('>Q', self._get_ntp_timestamp())
+        ] + \
+        [   # Sequence number
+            0x02,0x02,0x02,0x02] + \
+        [   # Reserved Beam logic Timestamp (1/3 of us)
+            ord(b) for b in struct.pack('>Q', timestamp)] + \
+        [   # Reserved
+            rssi,
+            0x00
+        ] + \
         [
-            0x02,0x02,0x02,0x02,
-            0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
             length,
         ]
+
+    @staticmethod
+    def _get_ntp_timestamp():
+        diff = datetime.datetime.utcnow() - datetime.datetime(1900, 1, 1, 0, 0, 0)
+        return diff.days * 24 * 60 * 60 + diff.seconds
+
 
 class TxMqttThread(threading.Thread):
     '''
