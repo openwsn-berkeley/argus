@@ -1,7 +1,7 @@
-'''
+"""
 Argus client script which attaches to the broker and sends
 sniffed packets through a pipe to Wireshark.
-'''
+"""
 
 import threading
 import time
@@ -17,8 +17,10 @@ import paho.mqtt.client
 
 import ArgusVersion
 
+
 def isLinux():
     return platform.system() == "Linux"
+
 
 def isWindows():
     return platform.system() == "Windows"
@@ -35,10 +37,12 @@ else:
 
 #============================ helpers =========================================
 
+
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
 
-def logCrash(threadName,err):
+
+def logCrash(threadName, err):
     output  = []
     output += ["============================================================="]
     output += [currentUtcTime()]
@@ -56,17 +60,18 @@ def logCrash(threadName,err):
 
 #============================ classes =========================================
 
+
 class RxMqttThread(threading.Thread):
-    '''
+    """
     Thread which subscribes to the MQTT broker and pushes
     received frames to he
-    '''
+    """
 
     MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
     MQTT_BROKER_TOPIC   = 'inria-paris/beamlogic'
 
-    def __init__(self,txWiresharkThread):
+    def __init__(self, txWiresharkThread):
 
         # store params
         self.txWiresharkThread    = txWiresharkThread
@@ -84,26 +89,27 @@ class RxMqttThread(threading.Thread):
     def run(self):
         try:
             self.mqtt.connect(host=self.MQTT_BROKER_HOST, port=1883, keepalive=60)
-            self.mqtt.loop_forever() # handles reconnects
+            self.mqtt.loop_forever()  # handles reconnects
         except Exception as err:
-            logCrash(self.name,err)
+            logCrash(self.name, err)
 
     #======================== public ==========================================
 
     #======================== private =========================================
 
-    def _mqtt_on_connect(self,client,userdata,flags,rc):
-        assert rc==0
+    def _mqtt_on_connect(self, client, userdata, flags, rc):
+        assert rc == 0
         print("INFO: Connected to {0} MQTT broker".format(self.MQTT_BROKER_HOST))
         self.mqtt.subscribe('argus/{0}'.format(self.MQTT_BROKER_TOPIC))
 
-    def _mqtt_on_message(self,client,userdata,msg):
+    def _mqtt_on_message(self, client, userdata, msg):
         self.txWiresharkThread.publish(msg.payload)
 
+
 class TxWiresharkThread(threading.Thread):
-    '''
+    """
     Thread which publishes sniffed frames to Wireshark broker.
-    '''
+    """
 
     if isWindows():
         PIPE_NAME_WIRESHARK = r'\\.\pipe\argus'
@@ -144,14 +150,14 @@ class TxWiresharkThread(threading.Thread):
                 try:
                     # connect to pipe (blocks until Wireshark appears)
                     if isWindows():
-                        win32pipe.ConnectNamedPipe(self.pipe,None)
+                        win32pipe.ConnectNamedPipe(self.pipe, None)
                     elif isLinux():
                         open(self.PIPE_NAME_WIRESHARK, 'wb')
 
                     # send PCAP global header to Wireshark
                     ghdr = self._createPcapGlobalHeader()
                     if isWindows():
-                        win32file.WriteFile(self.pipe,ghdr)
+                        win32file.WriteFile(self.pipe, ghdr)
                     elif isLinux():
                         self.pipe.write(ghdr)
                         self.pipe.flush()
@@ -176,11 +182,11 @@ class TxWiresharkThread(threading.Thread):
                     elif isLinux():
                         self.pipe.close()
         except Exception as err:
-            logCrash(self.name,err)
+            logCrash(self.name, err)
 
     #======================== public ==========================================
 
-    def publish(self,msg):
+    def publish(self, msg):
         with self.dataLock:
             if not self.wiresharkConnected:
                 # no Wireshark listening, dropping.
@@ -190,40 +196,42 @@ class TxWiresharkThread(threading.Thread):
         udp      = ''.join(
             [
                 chr(b) for b in [
-                    0x00,0x00,              # source port
-                    0x45,0x5a,              # destination port
-                    0x00,8+len(zep),        # length
-                    0xbc,0x04,              # checksum
+                    0x00, 0x00,             # source port
+                    0x45, 0x5a,             # destination port
+                    0x00, 8+len(zep),       # length
+                    0xbc, 0x04,             # checksum
                 ]
             ]
         )
         ipv6     = ''.join(
             [
                 chr(b) for b in [
-                    0x60,                   # version
-                    0x00,0x00,0x00,         # traffic class
-                    0x00,len(udp)+len(zep), # payload length
-                    0x11,                   # next header (17==UDP)
-                    0x08,                   # HLIM
-                    0xbb,0xbb,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01, # src
-                    0xbb,0xbb,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01, # dest
+                    0x60,                       # version
+                    0x00, 0x00, 0x00,           # traffic class
+                    0x00, len(udp) + len(zep),  # payload length
+                    0x11,                       # next header (17==UDP)
+                    0x08,                       # HLIM
+                    0xbb, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x01,  # src
+                    0xbb, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x01,  # dest
                 ]
             ]
         )
         ethernet = ''.join([chr(b) for b in [
-                    0x00,0x00,0x00,0x00,0x00,0x00,    # source
-                    0x00,0x00,0x00,0x00,0x00,0x00,    # destination
-                    0x86,0xdd,                        # type (IPv6)
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,     # source
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,     # destination
+                    0x86, 0xdd,                             # type (IPv6)
                 ]
             ]
         )
 
-        frame    = ''.join([ethernet,ipv6,udp,zep])
+        frame    = ''.join([ethernet, ipv6, udp, zep])
         pcap     = self._createPcapPacketHeader(len(frame))
 
         try:
             if isWindows():
-                win32file.WriteFile(self.pipe,pcap+frame)
+                win32file.WriteFile(self.pipe, pcap+frame)
             elif isLinux():
                 self.pipe.write(pcap+frame)
                 self.pipe.flush()
@@ -234,7 +242,7 @@ class TxWiresharkThread(threading.Thread):
     #======================== private =========================================
 
     def _createPcapGlobalHeader(self):
-        '''
+        """
         Create a PCAP global header.
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -248,21 +256,21 @@ class TxWiresharkThread(threading.Thread):
             guint32 snaplen;        /* max length of captured packets, in octets */
             guint32 network;        /* data link type */
         } pcap_hdr_t;
-        '''
+        """
 
         return struct.pack(
             '<IHHiIII',
-            0xa1b2c3d4, # magic_number
-            0x0002,     # version_major
-            0x0004,     # version_minor
-            0,          # thiszone
-            0x00000000, # sigfigs
-            0x0000ffff, # snaplen
-            0x00000001, # network
+            0xa1b2c3d4,  # magic_number
+            0x0002,      # version_major
+            0x0004,      # version_minor
+            0,           # thiszone
+            0x00000000,  # sigfigs
+            0x0000ffff,  # snaplen
+            0x00000001,  # network
         )
 
-    def _createPcapPacketHeader(self,length):
-        '''
+    def _createPcapPacketHeader(self, length):
+        """
         Create a PCAP global header.
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -273,15 +281,16 @@ class TxWiresharkThread(threading.Thread):
             guint32 incl_len;       /* number of octets of packet saved in file */
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
-        '''
+        """
         t = time.time()
         return struct.pack(
             '<IIII',
-            int(t), # ts_sec
-            1000 * (t - int(t)), # ts_usec
-            length,     # incl_len
-            length,     # orig_len
+            int(t),                 # ts_sec
+            1000 * (t - int(t)),    # ts_usec
+            length,                 # incl_len
+            length,                 # orig_len
         )
+
 
 class CliThread(object):
     def __init__(self):
@@ -294,12 +303,13 @@ class CliThread(object):
             )
 
             while True:
-                input = raw_input('> ')
-                print input,
+                user_input = raw_input('> ')
+                print user_input,
         except Exception as err:
-            logCrash('CliThread',err)
+            logCrash('CliThread', err)
 
 #============================ main ============================================
+
 
 def main():
     try:
@@ -307,7 +317,8 @@ def main():
 
         # start Wireshark
         if isWindows():
-            wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe', r'-i\\.\pipe\argus','-k']
+            wireshark_cmd        = ['C:\Program Files\Wireshark\Wireshark.exe',
+                                    r'-i\\.\pipe\argus', '-k']
         elif isLinux():
             fifo_name = "/tmp/argus"
             if not os.path.exists(fifo_name):
@@ -325,7 +336,7 @@ def main():
         rxMqttThread         = RxMqttThread(txWiresharkThread)
         cliThread            = CliThread()
     except Exception as err:
-        logCrash('main',err)
+        logCrash('main', err)
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
