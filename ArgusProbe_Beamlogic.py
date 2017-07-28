@@ -1,7 +1,7 @@
-'''
+"""
 Argus probe for the Beamlogic Site Analyzer Lite
 http://www.beamlogic.com/products/802154-site-analyzer.aspx
-'''
+"""
 
 import time
 import struct
@@ -18,10 +18,12 @@ import ArgusVersion
 
 #============================ helpers =========================================
 
+
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
 
-def logCrash(threadName,err):
+
+def logCrash(threadName, err):
     output  = []
     output += ["============================================================="]
     output += [currentUtcTime()]
@@ -39,17 +41,18 @@ def logCrash(threadName,err):
 
 #============================ classes =========================================
 
-class RxSnifferThread(threading.Thread):
-    '''
-    Thread which attaches to the sniffer and parses incoming frames.
-    '''
 
-    PCAP_GLOBALHEADER_LEN    = 24 # 4+2+2+4+4+4+4
-    PCAP_PACKETHEADER_LEN    = 16 # 4+4+4+4
-    BEAMLOGIC_HEADER_LEN     = 18 # 8+1+1+4+4
+class RxSnifferThread(threading.Thread):
+    """
+    Thread which attaches to the sniffer and parses incoming frames.
+    """
+
+    PCAP_GLOBALHEADER_LEN    = 24  # 4+2+2+4+4+4+4
+    PCAP_PACKETHEADER_LEN    = 16  # 4+4+4+4
+    BEAMLOGIC_HEADER_LEN     = 18  # 8+1+1+4+4
     PIPE_SNIFFER             = r'\\.\pipe\analyzer'
 
-    def __init__(self,txMqttThread):
+    def __init__(self, txMqttThread):
 
         # store params
         self.txMqttThread             = txMqttThread
@@ -67,56 +70,56 @@ class RxSnifferThread(threading.Thread):
 
     def run(self):
         try:
-            time.sleep(1) # let the banners print
+            time.sleep(1)  # let the banners print
             while True:
                 try:
                     with open(self.PIPE_SNIFFER, 'rb') as sniffer:
                         while True:
                             b = ord(sniffer.read(1))
                             self._newByte(b)
-                except (IOError):
+                except IOError:
                     print "WARNING: Could not read from pipe at \"{0}\".".format(
                         self.PIPE_SNIFFER
                     )
                     print "Is SiteAnalyzerAdapter running?"
                     time.sleep(1)
         except Exception as err:
-            logCrash(self.name,err)
+            logCrash(self.name, err)
 
     #======================== public ==========================================
 
     #======================== private =========================================
 
-    def _newByte(self,b):
-        '''
+    def _newByte(self, b):
+        """
         Just received a byte from the sniffer
-        '''
+        """
         with self.dataLock:
             self.rxBuffer += [b]
 
             # PCAP global header
             if   not self.doneReceivingGlobalHeader:
-                if len(self.rxBuffer)==self.PCAP_GLOBALHEADER_LEN:
+                if len(self.rxBuffer) == self.PCAP_GLOBALHEADER_LEN:
                     self.doneReceivingGlobalHeader    = True
                     self.rxBuffer                     = []
 
             # PCAP packet header
             elif not self.doneReceivingPacketHeader:
-                if len(self.rxBuffer)==self.PCAP_PACKETHEADER_LEN:
+                if len(self.rxBuffer) == self.PCAP_PACKETHEADER_LEN:
                     self.doneReceivingPacketHeader    = True
                     self.packetHeader                 = self._parsePcapPacketHeader(self.rxBuffer)
-                    assert self.packetHeader['incl_len']==self.packetHeader['orig_len']
+                    assert self.packetHeader['incl_len'] == self.packetHeader['orig_len']
                     self.rxBuffer                     = []
 
             # PCAP packet bytes
             else:
-                if len(self.rxBuffer)==self.packetHeader['incl_len']:
+                if len(self.rxBuffer) == self.packetHeader['incl_len']:
                     self.doneReceivingPacketHeader    = False
                     self._newFrame(self.rxBuffer)
                     self.rxBuffer                     = []
 
-    def _parsePcapPacketHeader(self,header):
-        '''
+    def _parsePcapPacketHeader(self, header):
+        """
         Parse a PCAP packet header
 
         Per https://wiki.wireshark.org/Development/LibpcapFileFormat:
@@ -127,9 +130,9 @@ class RxSnifferThread(threading.Thread):
             guint32 incl_len;       /* number of octets of packet saved in file */
             guint32 orig_len;       /* actual length of packet */
         } pcaprec_hdr_t;
-        '''
+        """
 
-        assert len(header)==self.PCAP_PACKETHEADER_LEN
+        assert len(header) == self.PCAP_PACKETHEADER_LEN
 
         returnVal = {}
         (
@@ -141,10 +144,10 @@ class RxSnifferThread(threading.Thread):
 
         return returnVal
 
-    def _newFrame(self,frame):
-        '''
+    def _newFrame(self, frame):
+        """
         Just received a full frame from the sniffer
-        '''
+        """
 
         # transform frame
         frame = self._transformFrame(frame)
@@ -152,10 +155,10 @@ class RxSnifferThread(threading.Thread):
         # publish frame
         self.txMqttThread.publishFrame(frame)
 
-    def _transformFrame(self,frame):
-        '''
+    def _transformFrame(self, frame):
+        """
         Replace BeamLogic header by ZEP header.
-        '''
+        """
 
         beamlogic  = self._parseBeamlogicHeader(frame[1:1+self.BEAMLOGIC_HEADER_LEN])
         ieee154    = frame[self.BEAMLOGIC_HEADER_LEN+2:-1]
@@ -168,8 +171,8 @@ class RxSnifferThread(threading.Thread):
 
         return zep+ieee154
 
-    def _parseBeamlogicHeader(self,header):
-        '''
+    def _parseBeamlogicHeader(self, header):
+        """
         Parse a Beamlogic header
 
         uint64    TimeStamp
@@ -177,9 +180,9 @@ class RxSnifferThread(threading.Thread):
         uint8     RSSI
         uint32    GpsLat
         uint32    GpsLong
-        '''
+        """
 
-        assert len(header)==self.BEAMLOGIC_HEADER_LEN
+        assert len(header) == self.BEAMLOGIC_HEADER_LEN
 
         returnVal = {}
         (
@@ -206,7 +209,7 @@ class RxSnifferThread(threading.Thread):
             ord(b) for b in struct.pack('>Q', self._get_ntp_timestamp())
         ] + \
         [   # Sequence number
-            0x02,0x02,0x02,0x02] + \
+            0x02, 0x02, 0x02, 0x02] + \
         [   # Reserved Beam logic Timestamp (1/3 of us)
             ord(b) for b in struct.pack('>Q', timestamp)] + \
         [   # Reserved
@@ -222,11 +225,10 @@ class RxSnifferThread(threading.Thread):
         diff = datetime.datetime.utcnow() - datetime.datetime(1900, 1, 1, 0, 0, 0)
         return diff.days * 24 * 60 * 60 + diff.seconds
 
-
 class TxMqttThread(threading.Thread):
-    '''
+    """
     Thread which publishes sniffed frames to the MQTT broker.
-    '''
+    """
 
     MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
@@ -246,7 +248,7 @@ class TxMqttThread(threading.Thread):
         try:
             while True:
                 # wait for first frame
-                msgs = [self.txQueue.get(),]
+                msgs = [self.txQueue.get(), ]
 
                 # get other frames (if any)
                 try:
@@ -278,18 +280,18 @@ class TxMqttThread(threading.Thread):
                     )
 
         except Exception as err:
-            logCrash(self.name,err)
+            logCrash(self.name, err)
 
     #======================== public ==========================================
 
-    def publishFrame(self,frame):
+    def publishFrame(self, frame):
         msg = {
             'description':   'zep',
             'device':        'Beamlogic',
             'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
         }
         try:
-            self.txQueue.put(json.dumps(msg),block=False)
+            self.txQueue.put(json.dumps(msg), block=False)
         except Queue.Full:
             print "WARNING transmit queue to MQTT broker full. Dropping frame."
 
@@ -307,12 +309,13 @@ class CliThread(object):
             )
 
             while True:
-                input = raw_input('>')
-                print input,
+                user_input = raw_input('>')
+                print user_input,
         except Exception as err:
-            logCrash('CliThread',err)
+            logCrash('CliThread', err)
 
 #============================ main ============================================
+
 
 def main():
     # parse parameters
@@ -322,5 +325,5 @@ def main():
     rxSnifferThread     = RxSnifferThread(txMqttThread)
     cliThread           = CliThread()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
