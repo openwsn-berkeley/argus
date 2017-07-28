@@ -158,7 +158,7 @@ class RxSnifferThread(threading.Thread):
         '''
 
         beamlogic  = self._parseBeamlogicHeader(frame[:self.BEAMLOGIC_HEADER_LEN])
-        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN:beamlogic['Length']-self.BEAMLOGIC_HEADER_LEN]
+        ieee154    = frame[self.BEAMLOGIC_HEADER_LEN:beamlogic['Length']+self.BEAMLOGIC_HEADER_LEN]
         zep        = self._formatZep(
             channel         = beamlogic['Channel'],
             timestamp       = beamlogic['TimeStamp'],
