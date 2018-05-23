@@ -39,6 +39,26 @@ def logCrash(threadName, err):
 
     print output
 
+def AT86RF231_rssi_convert(at86rf231_rssi):
+    """ Convert the RSSI value return by the AT86RF231 chip into actual RSSI
+
+    AT86RF231 documentation:
+        The RSSI value is a 5-bit value indicating the receive power,
+        in steps of 3 dB and with a range of 0-28.
+        An RSSI value of 0 indicates a receiver RF input power of
+        PRF < -91 dBm.
+        For an RSSI value in the range of 1 to 28, the RF input power can be calculated
+        as follows: PRF = RSSI_BASE_VAL + 3*(RSSI -1) [dBm]
+    """
+
+    RSSI_BASE_VAL = -91
+    STEP = 3
+
+    if at86rf231_rssi == 0:
+        return RSSI_BASE_VAL
+    else:
+        return RSSI_BASE_VAL + STEP * (at86rf231_rssi - 1)
+
 #============================ classes =========================================
 
 
