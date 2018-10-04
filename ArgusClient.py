@@ -329,7 +329,7 @@ def main():
                     exit()
             wireshark_cmd        = ["wireshark", "-k", "-i", format(fifo_name)]
 
-        proc                 = subprocess.Popen(wireshark_cmd)
+        proc                 = subprocess.Popen(wireshark_cmd, shell=True)
 
         # start threads
         txWiresharkThread    = TxWiresharkThread()
