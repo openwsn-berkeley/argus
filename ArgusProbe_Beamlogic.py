@@ -11,7 +11,7 @@ import json
 import Queue
 import traceback
 import datetime
-
+import argparse
 import paho.mqtt.publish
 
 import ArgusVersion
@@ -42,7 +42,7 @@ def logCrash(threadName, err):
 #============================ classes =========================================
 
 
-class RxSnifferThread(threading.Thread):
+class BeamLogic_RxSnifferThread(threading.Thread):
     """
     Thread which attaches to the sniffer and parses incoming frames.
     """
@@ -65,7 +65,7 @@ class RxSnifferThread(threading.Thread):
 
         # start the thread
         threading.Thread.__init__(self)
-        self.name            = 'RxSnifferThread'
+        self.name            = 'BeamLogic_RxSnifferThread'
         self.start()
 
     def run(self):
@@ -320,12 +320,23 @@ class CliThread(object):
 
 
 def main():
-    # parse parameters
+    # parse args
+    parser = argparse.ArgumentParser() #creating an ArgumentParser object
+    parser.add_argument("--probetype", nargs="?", default="BeamLogic", choices=["BeamLogic", "Serial","OpenTestBed"])
+    args = parser.parse_args()
 
     # start thread
-    txMqttThread        = TxMqttThread()
-    rxSnifferThread     = RxSnifferThread(txMqttThread)
-    cliThread           = CliThread()
+    txMqttThread                  = TxMqttThread()
+    if args.probetype   == "BeamLogic":
+        beamlogic_rxSnifferThread = BeamLogic_RxSnifferThread(txMqttThread)
+    elif args.probetype == "Serial":
+        pass
+    elif args.probetype == "OpenTestBed":
+        pass
+    else:
+        print('We do not support this probe type!')
+
+    cliThread                     = CliThread()
 
 if __name__ == "__main__":
     main()
