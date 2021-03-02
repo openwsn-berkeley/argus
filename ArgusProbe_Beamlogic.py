@@ -13,7 +13,7 @@ import traceback
 import datetime
 import argparse
 import paho.mqtt.publish
-
+import serial
 import ArgusVersion
 
 #============================ helpers =========================================
@@ -227,12 +227,113 @@ class BeamLogic_RxSnifferThread(threading.Thread):
         diff = datetime.datetime.utcnow() - datetime.datetime(1900, 1, 1, 0, 0, 0)
         return diff.days * 24 * 60 * 60 + diff.seconds
 
+#adding new class for Serial probe type
+class Serial_RxSnifferThread(threading.Thread):
+    """
+    Thread which attaches to the serial and put frames into queue.
+    """
+
+    def __init__(self, txMqttThread, serialport):
+
+        # store params
+        self.txMqttThread             = txMqttThread
+        self.serialport               = serialport
+        self.baudrate                 = 115200          #Should i put it in input params?
+
+        # local variables
+        self.serialHandler           = None
+        self.rxBuffer                = []               #keep the frame
+        self.goOn                    = True
+        self.pleaseConnect           = True
+        self.dataLock                = threading.RLock()
+
+
+        # initialize thread
+        super(Serial_RxSnifferThread, self).__init__()
+        self.name                 = 'Serial_RxSnifferThread@{0}'.format(self.serialport)
+        self.start()
+
+    def run(self):
+
+        time.sleep(1)  # let the banners print
+        while self.goOn:
+            try:
+                with self.dataLock:
+                    pleaseConnect = self.pleaseConnect
+
+                if pleaseConnect:
+                    # open serial port
+                    self.serialHandler = serial.Serial(self.serialport, baudrate=self.baudrate)
+
+                    # read byte
+                    while True:
+                        waitingbytes   = self.serialHandler.inWaiting()
+                        if waitingbytes != 0:
+                            c = self.serialHandler.read(waitingbytes)
+                            self._newByte(c)
+                            print (c)
+                            time.sleep(0.2)
+
+            except serial.SerialException:
+                # mote disconnected, or pyserialHandler closed
+                # destroy pyserial instance
+                print "WARNING: Could not read from serial at \"{0}\".".format(
+                        self.serialport)
+                print "Is device connected?"
+                self.goOn            = False
+                self.serialHandler   = None
+                time.sleep(1)
+
+
+            except Exception as err:
+                logCrash(self.name, err)
+
+
+    #======================== public ==========================================
+
+    def connectSerialPort(self):
+        with self.dataLock:
+            self.pleaseConnect = True
+
+    def disconnectSerialPort(self):
+        with self.dataLock:
+            self.pleaseConnect = False
+        try:
+            self.serialHandler.close()
+        except:
+            pass
+
+    def close(self):
+        self.goOn            = False
+    #======================== public ==========================================
+
+    #======================== private =========================================
+
+    def _newByte(self, b):
+        """
+        Just received a byte from the sniffer
+        """
+        with self.dataLock:
+            self.rxBuffer      += [b]
+
+        self._newFrame(self.rxBuffer)
+        self.rxBuffer           = []
+
+    def _newFrame(self, frame):
+        """
+        Just received a full frame from the sniffer
+        """
+        # publish frame
+        self.txMqttThread.publishFrame(frame)
+
+
+#########################################################################################
 class TxMqttThread(threading.Thread):
     """
     Thread which publishes sniffed frames to the MQTT broker.
     """
 
-    MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
+    MQTT_BROKER_HOST    = 'argus.paris.inria.fr' #'broker.hivemq.com' for testing
     MQTT_BROKER_PORT    = 1883
     MQTT_BROKER_TOPIC   = 'inria-paris/beamlogic'
 
@@ -274,12 +375,14 @@ class TxMqttThread(threading.Thread):
                         hostname     = self.MQTT_BROKER_HOST,
                         port         = self.MQTT_BROKER_PORT,
                     )
+
                 except Exception as err:
                     print "WARNING publication to {0}:{1} over MQTT failed ({2})".format(
                         self.MQTT_BROKER_HOST,
                         self.MQTT_BROKER_PORT,
                         str(type(err)),
                     )
+
 
         except Exception as err:
             logCrash(self.name, err)
@@ -290,7 +393,7 @@ class TxMqttThread(threading.Thread):
         msg = {
             'description':   'zep',
             'device':        'Beamlogic',
-            'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
+            'bytes':         frame #''.join(['{0:02x}'.format(b) for b in frame]),
         }
         try:
             self.txQueue.put(json.dumps(msg), block=False)
@@ -308,6 +411,7 @@ class CliThread(object):
                 ArgusVersion.VERSION[1],
                 ArgusVersion.VERSION[2],
                 ArgusVersion.VERSION[3],
+
             )
 
             while True:
@@ -323,6 +427,7 @@ def main():
     # parse args
     parser = argparse.ArgumentParser() #creating an ArgumentParser object
     parser.add_argument("--probetype", nargs="?", default="BeamLogic", choices=["BeamLogic", "Serial","OpenTestBed"])
+    parser.add_argument("--serialport", help= 'Input the serial port for the Serial probe type')
     args = parser.parse_args()
 
     # start thread
@@ -330,11 +435,11 @@ def main():
     if args.probetype   == "BeamLogic":
         beamlogic_rxSnifferThread = BeamLogic_RxSnifferThread(txMqttThread)
     elif args.probetype == "Serial":
-        pass
+        serial_rxSnifferThread    = Serial_RxSnifferThread(txMqttThread,args.serialport)
     elif args.probetype == "OpenTestBed":
         pass
     else:
-        print('We do not support this probe type!')
+        print('This probe type is not supported!')
 
     cliThread                     = CliThread()
 
