@@ -15,13 +15,12 @@ import argparse
 import paho.mqtt.publish
 import serial
 import ArgusVersion
+import sys
 
 #============================ helpers =========================================
 
-
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
-
 
 def logCrash(threadName, err):
     output  = []
@@ -227,22 +226,21 @@ class BeamLogic_RxSnifferThread(threading.Thread):
         diff = datetime.datetime.utcnow() - datetime.datetime(1900, 1, 1, 0, 0, 0)
         return diff.days * 24 * 60 * 60 + diff.seconds
 
-#adding new class for Serial probe type
 class Serial_RxSnifferThread(threading.Thread):
     """
     Thread which attaches to the serial and put frames into queue.
     """
 
-    def __init__(self, txMqttThread, serialport):
+    def __init__(self, txMqttThread, serialport,baudrate):
 
         # store params
         self.txMqttThread             = txMqttThread
         self.serialport               = serialport
-        self.baudrate                 = 115200          #Should i put it in input params?
+        self.baudrate                 = baudrate
 
         # local variables
         self.serialHandler           = None
-        self.rxBuffer                = []               #keep the frame
+        self.rxBuffer                = []
         self.goOn                    = True
         self.pleaseConnect           = True
         self.dataLock                = threading.RLock()
@@ -270,8 +268,7 @@ class Serial_RxSnifferThread(threading.Thread):
                         waitingbytes   = self.serialHandler.inWaiting()
                         if waitingbytes != 0:
                             c = self.serialHandler.read(waitingbytes)
-                            self._newByte(c)
-                            print (c)
+                            self.txMqttThread.publishFrame(c)
                             time.sleep(0.2)
 
             except serial.SerialException:
@@ -283,7 +280,6 @@ class Serial_RxSnifferThread(threading.Thread):
                 self.goOn            = False
                 self.serialHandler   = None
                 time.sleep(1)
-
 
             except Exception as err:
                 logCrash(self.name, err)
@@ -307,33 +303,13 @@ class Serial_RxSnifferThread(threading.Thread):
         self.goOn            = False
     #======================== public ==========================================
 
-    #======================== private =========================================
-
-    def _newByte(self, b):
-        """
-        Just received a byte from the sniffer
-        """
-        with self.dataLock:
-            self.rxBuffer      += [b]
-
-        self._newFrame(self.rxBuffer)
-        self.rxBuffer           = []
-
-    def _newFrame(self, frame):
-        """
-        Just received a full frame from the sniffer
-        """
-        # publish frame
-        self.txMqttThread.publishFrame(frame)
-
-
 #########################################################################################
 class TxMqttThread(threading.Thread):
     """
     Thread which publishes sniffed frames to the MQTT broker.
     """
 
-    MQTT_BROKER_HOST    = 'argus.paris.inria.fr' #'broker.hivemq.com' for testing
+    MQTT_BROKER_HOST    = 'argus.paris.inria.fr'
     MQTT_BROKER_PORT    = 1883
     MQTT_BROKER_TOPIC   = 'inria-paris/beamlogic'
 
@@ -383,7 +359,6 @@ class TxMqttThread(threading.Thread):
                         str(type(err)),
                     )
 
-
         except Exception as err:
             logCrash(self.name, err)
 
@@ -411,7 +386,6 @@ class CliThread(object):
                 ArgusVersion.VERSION[1],
                 ArgusVersion.VERSION[2],
                 ArgusVersion.VERSION[3],
-
             )
 
             while True:
@@ -424,24 +398,26 @@ class CliThread(object):
 
 
 def main():
-    # parse args
+
     parser = argparse.ArgumentParser() #creating an ArgumentParser object
-    parser.add_argument("--probetype", nargs="?", default="BeamLogic", choices=["BeamLogic", "Serial","OpenTestBed"])
+    parser.add_argument("--probetype", nargs="?", default="beamlogic", choices=["beamlogic", "serial","opentestbed"])
     parser.add_argument("--serialport", help= 'Input the serial port for the Serial probe type')
+    parser.add_argument("--baudrate",  default= 115200)
     args = parser.parse_args()
 
     # start thread
-    txMqttThread                  = TxMqttThread()
-    if args.probetype   == "BeamLogic":
+    txMqttThread         = TxMqttThread()
+    if args.probetype   == "beamlogic":
         beamlogic_rxSnifferThread = BeamLogic_RxSnifferThread(txMqttThread)
-    elif args.probetype == "Serial":
-        serial_rxSnifferThread    = Serial_RxSnifferThread(txMqttThread,args.serialport)
-    elif args.probetype == "OpenTestBed":
+    elif args.probetype == "serial":
+        serial_rxSnifferThread    = Serial_RxSnifferThread(txMqttThread,args.serialport,args.baudrate)
+    elif args.probetype == "opentestbed":
         pass
     else:
         print('This probe type is not supported!')
+        sys.exit()
 
-    cliThread                     = CliThread()
+    cliThread           = CliThread()
 
 if __name__ == "__main__":
     main()
