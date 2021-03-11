@@ -3,24 +3,29 @@ Argus probe for the Beamlogic Site Analyzer Lite
 http://www.beamlogic.com/products/802154-site-analyzer.aspx
 """
 
-import time
-import struct
-import socket
-import threading
-import json
 import Queue
-import traceback
-import datetime
 import argparse
+import datetime
+import json
+import struct
+import sys
+import threading
+import time
+import traceback
+
 import paho.mqtt.publish
 import serial
+
 import ArgusVersion
-import sys
+import openhdlc
+
 
 #============================ helpers =========================================
 
+
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
+
 
 def logCrash(threadName, err):
     output  = []
@@ -231,24 +236,43 @@ class Serial_RxSnifferThread(threading.Thread):
     Thread which attaches to the serial and put frames into queue.
     """
 
+    XOFF                    = 0x13
+    XON                     = 0x11
+    XONXOFF_ESCAPE          = 0x12
+    XONXOFF_MASK            = 0x10
+
+    # XOFF            is transmitted as [XONXOFF_ESCAPE,           XOFF^XONXOFF_MASK]==[0x12,0x13^0x10]==[0x12,0x03]
+    # XON             is transmitted as [XONXOFF_ESCAPE,            XON^XONXOFF_MASK]==[0x12,0x11^0x10]==[0x12,0x01]
+    # XONXOFF_ESCAPE  is transmitted as [XONXOFF_ESCAPE, XONXOFF_ESCAPE^XONXOFF_MASK]==[0x12,0x12^0x10]==[0x12,0x02]
+
     def __init__(self, txMqttThread, serialport,baudrate):
 
         # store params
-        self.txMqttThread             = txMqttThread
-        self.serialport               = serialport
-        self.baudrate                 = baudrate
+        self.txMqttThread            = txMqttThread
+        self.serialport              = serialport
+        self.baudrate                = baudrate
 
         # local variables
         self.serialHandler           = None
-        self.rxBuffer                = []
         self.goOn                    = True
         self.pleaseConnect           = True
         self.dataLock                = threading.RLock()
 
+        # hdlc frame parser object
+        self.hdlc                    = openhdlc.OpenHdlc()
+        #frame parsing variables
+        self.rxBuffer                = ''
+        self.hdlc_flag               = False
+        self.receiving               = False
+        self.xonxoff_escaping        = False
+
+
+        # to be assigned, callback
+        self.send_to_parser          = None
 
         # initialize thread
         super(Serial_RxSnifferThread, self).__init__()
-        self.name                 = 'Serial_RxSnifferThread@{0}'.format(self.serialport)
+        self.name                    = 'Serial_RxSnifferThread@{0}'.format(self.serialport)
         self.start()
 
     def run(self):
@@ -267,15 +291,16 @@ class Serial_RxSnifferThread(threading.Thread):
                     while True:
                         waitingbytes   = self.serialHandler.inWaiting()
                         if waitingbytes != 0:
-                            c = self.serialHandler.read(waitingbytes)
-                            self.txMqttThread.publishFrame(c)
-                            time.sleep(0.2)
+                            c= self.serialHandler.read(waitingbytes)
+                            for byte in c:
+                               self._newByte(byte)
+                            time.sleep(2)
 
             except serial.SerialException:
                 # mote disconnected, or pyserialHandler closed
                 # destroy pyserial instance
                 print "WARNING: Could not read from serial at \"{0}\".".format(
-                        self.serialport)
+                       self.serialport)
                 print "Is device connected?"
                 self.goOn            = False
                 self.serialHandler   = None
@@ -283,7 +308,6 @@ class Serial_RxSnifferThread(threading.Thread):
 
             except Exception as err:
                 logCrash(self.name, err)
-
 
     #======================== public ==========================================
 
@@ -302,6 +326,88 @@ class Serial_RxSnifferThread(threading.Thread):
     def close(self):
         self.goOn            = False
     #======================== public ==========================================
+
+    #======================== private =========================================
+    def _rx_buf_add(self, byte):
+        """ Adds byte to buffer and escapes the XONXOFF bytes """
+
+        if byte == chr(self.XONXOFF_ESCAPE):
+            self.xonxoff_escaping = True
+        else:
+            if self.xonxoff_escaping is True:
+                self.rxBuffer += chr(ord(byte) ^ self.XONXOFF_MASK)
+                self.xonxoff_escaping = False
+            elif byte != chr(self.XON) and byte != chr(self.XOFF):
+                self.rxBuffer += byte
+
+    def _handle_frame(self):
+        """ Handles a HDLC frame """
+        valid_frame = False
+        #temp_buf = self.rxBuffer   in case of an error
+        try:
+            self.rxBuffer  = self.hdlc.dehdlcify(self.rxBuffer)
+            '''
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("{}: {} dehdlcized input: {}".format(
+                    self.name,
+                    format_string_buf(temp_buf),
+                    format_string_buf(self.rxBuffer)))
+            '''
+            if self.send_to_parser:
+                self.send_to_parser([ord(c) for c in self.rxBuffer])
+
+            valid_frame = True
+        except openhdlc.HdlcException as err:
+            #log.warning('{}: invalid serial frame: {} {}'.format(self.name, format_string_buf(temp_buf), err))
+            print 'Err'
+        return valid_frame
+
+    def _newByte(self, b):
+        """
+        Parses bytes received from serial pipe
+        """
+        if not self.receiving:
+                if self.hdlc_flag and b != self.hdlc.HDLC_FLAG:
+                    # start of frame
+                    print ('Start of HDLC frame..')
+                    self.receiving        = True
+                    # discard received self.hdlc_flag
+                    self.hdlc_flag        = False
+                    self.xonxoff_escaping = False
+                    self.rxBuffer         = self.hdlc.HDLC_FLAG
+                    self._rx_buf_add(b)
+                elif b  == self.hdlc.HDLC_FLAG:
+                    # received hdlc flag
+                    self.hdlc_flag        = True
+                else:
+                    # drop garbage
+                    pass
+        else:
+                if b != self.hdlc.HDLC_FLAG:
+                    # middle of frame
+                    self._rx_buf_add(b)
+                else:
+                    # end of frame, received self.hdlc_flag
+                    print ("End of HDLC frame ..")
+                    self.hdlc_flag = True
+                    self.receiving = False
+                    self._rx_buf_add(b)
+                    valid_frame    = self._handle_frame()
+
+                    if valid_frame:
+                        # discard valid frame self.hdlc_flag
+                        self.hdlc_flag  = False
+                        self._newFrame(self.rxBuffer)
+                        self.rxBuffer           = []
+
+    def _newFrame(self, frame):
+        """
+        Just received a full frame from the sniffer
+        """
+        # publish frame
+        #self.txMqttThread.publishFrame(frame)
+        pass
+
 
 #########################################################################################
 class TxMqttThread(threading.Thread):
@@ -351,7 +457,6 @@ class TxMqttThread(threading.Thread):
                         hostname     = self.MQTT_BROKER_HOST,
                         port         = self.MQTT_BROKER_PORT,
                     )
-
                 except Exception as err:
                     print "WARNING publication to {0}:{1} over MQTT failed ({2})".format(
                         self.MQTT_BROKER_HOST,
@@ -368,7 +473,7 @@ class TxMqttThread(threading.Thread):
         msg = {
             'description':   'zep',
             'device':        'Beamlogic',
-            'bytes':         frame #''.join(['{0:02x}'.format(b) for b in frame]),
+            'bytes':         ''.join(['{0:02x}'.format(b) for b in frame]),
         }
         try:
             self.txQueue.put(json.dumps(msg), block=False)
@@ -396,9 +501,7 @@ class CliThread(object):
 
 #============================ main ============================================
 
-
 def main():
-
     parser = argparse.ArgumentParser() #creating an ArgumentParser object
     parser.add_argument("--probetype", nargs="?", default="beamlogic", choices=["beamlogic", "serial","opentestbed"])
     parser.add_argument("--serialport", help= 'Input the serial port for the Serial probe type')
@@ -417,7 +520,7 @@ def main():
         print('This probe type is not supported!')
         sys.exit()
 
-    cliThread           = CliThread()
+    cliThread            = CliThread()
 
 if __name__ == "__main__":
     main()
