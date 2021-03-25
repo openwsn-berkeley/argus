@@ -266,6 +266,8 @@ class Serial_RxSnifferThread(threading.Thread):
         self.receiving               = False
         self.xonxoff_escaping        = False
 
+        self.status                  = ''
+        self.HEADER_LENGTH           = 2
 
         # to be assigned, callback
         self.send_to_parser          = None
@@ -356,6 +358,23 @@ class Serial_RxSnifferThread(threading.Thread):
             print 'Err'
         return valid_frame
 
+    def parse_input(self, data):
+
+        # ensure data not short longer than header
+        if len(data) < self.HEADER_LENGTH:
+            raise 'Error packet length'
+
+        _ = data[:2]  # header bytes
+
+        # remove mote id at the beginning.
+        data = data[2:]
+
+        event_type = 'sniffedPacket'
+
+        # notify a tuple including source as one hop away nodes elide SRC address as can be inferred from MAC layer
+        # header
+        return event_type,data
+
     def _newByte(self, b):
         """
         Parses bytes received from serial pipe
@@ -398,6 +417,9 @@ class Serial_RxSnifferThread(threading.Thread):
         """
         Just received a full frame from the sniffer
         """
+        #Parse incomming frame
+        frame, self.status = self.parse_input(frame)
+
         # publish frame
         #self.txMqttThread.publishFrame(frame)
         pass
