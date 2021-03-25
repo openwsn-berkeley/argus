@@ -343,20 +343,14 @@ class Serial_RxSnifferThread(threading.Thread):
     def _handle_frame(self):
         """ Handles a HDLC frame """
         valid_frame = False
-        #temp_buf = self.rxBuffer   in case of an error
         try:
             self.rxBuffer  = self.hdlc.dehdlcify(self.rxBuffer)
-            '''
-            if log.isEnabledFor(logging.DEBUG):
-                log.debug("{}: {} dehdlcized input: {}".format(
-                    self.name,
-                    format_string_buf(temp_buf),
-                    format_string_buf(self.rxBuffer)))
-            '''
+
             if self.send_to_parser:
                 self.send_to_parser([ord(c) for c in self.rxBuffer])
+            if self.rxBuffer[0] == 'P':   #packet from sniffer SERFRAME_MOTE2PC_SNIFFED_PACKET 'P'
+                valid_frame = True
 
-            valid_frame = True
         except openhdlc.HdlcException as err:
             #log.warning('{}: invalid serial frame: {} {}'.format(self.name, format_string_buf(temp_buf), err))
             print 'Err'
@@ -369,7 +363,7 @@ class Serial_RxSnifferThread(threading.Thread):
         if not self.receiving:
                 if self.hdlc_flag and b != self.hdlc.HDLC_FLAG:
                     # start of frame
-                    print ('Start of HDLC frame..')
+                    #print ('Start of HDLC frame..')
                     self.receiving        = True
                     # discard received self.hdlc_flag
                     self.hdlc_flag        = False
@@ -388,7 +382,7 @@ class Serial_RxSnifferThread(threading.Thread):
                     self._rx_buf_add(b)
                 else:
                     # end of frame, received self.hdlc_flag
-                    print ("End of HDLC frame ..")
+                    #print ("End of HDLC frame ..")
                     self.hdlc_flag = True
                     self.receiving = False
                     self._rx_buf_add(b)
