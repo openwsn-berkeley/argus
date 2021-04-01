@@ -292,7 +292,7 @@ class Serial_RxSnifferThread(threading.Thread):
         # hdlc frame parser object
         self.hdlc                    = openhdlc.OpenHdlc()
         #frame parsing variables
-        self.rxBuffer                = ''
+        self.rxBuffer                = []
         self.hdlc_flag               = False
         self.receiving               = False
         self.xonxoff_escaping        = False
@@ -367,10 +367,10 @@ class Serial_RxSnifferThread(threading.Thread):
             self.xonxoff_escaping = True
         else:
             if self.xonxoff_escaping is True:
-                self.rxBuffer += chr(ord(byte) ^ self.XONXOFF_MASK)
+                self.rxBuffer.append(chr(ord(byte) ^ self.XONXOFF_MASK))
                 self.xonxoff_escaping = False
             elif byte != chr(self.XON) and byte != chr(self.XOFF):
-                self.rxBuffer += byte
+                self.rxBuffer.append(byte)
 
     def _handle_frame(self):
         """ Handles a HDLC frame """
@@ -416,10 +416,11 @@ class Serial_RxSnifferThread(threading.Thread):
                     # discard received self.hdlc_flag
                     self.hdlc_flag        = False
                     self.xonxoff_escaping = False
-                    self.rxBuffer         = self.hdlc.HDLC_FLAG
+                    self.rxBuffer.append(self.hdlc.HDLC_FLAG)
                     self._rx_buf_add(b)
                 elif b  == self.hdlc.HDLC_FLAG:
                     # received hdlc flag
+                    self.rxBuffer         = [] # Start of the frame, reset
                     self.hdlc_flag        = True
                 else:
                     # drop garbage
@@ -439,18 +440,17 @@ class Serial_RxSnifferThread(threading.Thread):
                         # discard valid frame self.hdlc_flag
                         self.hdlc_flag  = False
                         self._newFrame(self.rxBuffer)
-                        #self.rxBuffer           = []
+                        self.rxBuffer           = []
 
     def _newFrame(self, frame):
         """
         Just received a full frame from the sniffer
         """
         #Parse incomming frame
-        frame, self.status = self.parse_input(frame)
+        frame = self.parse_input(frame)
 
         # transform frame
         frame = self._transformFrame(frame)
-
         # publish frame
         #self.txMqttThread.publishFrame(frame)
         pass
@@ -465,7 +465,7 @@ class Serial_RxSnifferThread(threading.Thread):
 
         zep   = self._formatZep(body,frequency)
         #frame = self._dispatch_mesh_debug_packet(zep)
-        return frame
+        return zep #at the moment
 
     def _formatZep (self, body, frequency):
         # ZEP header
@@ -484,11 +484,10 @@ class Serial_RxSnifferThread(threading.Thread):
         # mac frame
         mac = body
         mac += self.calculate_fcs(mac)
-        return ''.join(map(str,zep)) + mac
+        return zep + mac
 
     def calculate_fcs(self,rpayload):
         payload = []
-        a = ''
         for b in rpayload:
             payload += [self.byteinverse(ord(b))]
         crc = 0x0000
@@ -498,8 +497,7 @@ class Serial_RxSnifferThread(threading.Thread):
             self.byteinverse(crc >> 8),
             self.byteinverse(crc & 0xff),
         ]
-
-        return a.join(map(str, return_val))
+        return return_val
 
     def byteinverse(self,b):
     # TODO: speed up through lookup table

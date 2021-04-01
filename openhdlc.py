@@ -111,8 +111,11 @@ class OpenHdlc(object):
             log.debug("after flags:     {0}".format(format_string_buf(out_buf)))
 
         # unstuff
-        out_buf = out_buf.replace(self.HDLC_ESCAPE + self.HDLC_FLAG_ESCAPED, self.HDLC_FLAG)
-        out_buf = out_buf.replace(self.HDLC_ESCAPE + self.HDLC_ESCAPE_ESCAPED, self.HDLC_ESCAPE)
+        #out_buf = out_buf.replace(self.HDLC_ESCAPE + self.HDLC_FLAG_ESCAPED, self.HDLC_FLAG)
+        #out_buf = out_buf.replace(self.HDLC_ESCAPE + self.HDLC_ESCAPE_ESCAPED, self.HDLC_ESCAPE)
+        out_buf = [self.HDLC_FLAG if x== self.HDLC_ESCAPE + self.HDLC_FLAG_ESCAPED else x for x in out_buf]
+        out_buf = [self.HDLC_ESCAPE if x==self.HDLC_ESCAPE + self.HDLC_ESCAPE_ESCAPED else x for x in out_buf]
+
         if log.isEnabledFor(logging.DEBUG):
             log.debug("after unstuff:   {0}".format(format_string_buf(out_buf)))
 
