@@ -235,14 +235,15 @@ class Serial_RxSnifferThread(threading.Thread):
     """
     Thread which attaches to the serial and put frames into queue.
     """
-    # XOFF            is transmitted as [XONXOFF_ESCAPE,           XOFF^XONXOFF_MASK]==[0x12,0x13^0x10]==[0x12,0x03]
-    # XON             is transmitted as [XONXOFF_ESCAPE,            XON^XONXOFF_MASK]==[0x12,0x11^0x10]==[0x12,0x01]
+    # XOFF            is transmitted as [XONXOFF_ESCAPE, XOFF^XONXOFF_MASK]==[0x12,0x13^0x10]==[0x12,0x03]
+    # XON             is transmitted as [XONXOFF_ESCAPE, XON^XONXOFF_MASK]==[0x12,0x11^0x10]==[0x12,0x01]
     # XONXOFF_ESCAPE  is transmitted as [XONXOFF_ESCAPE, XONXOFF_ESCAPE^XONXOFF_MASK]==[0x12,0x12^0x10]==[0x12,0x02]
 
     XOFF                    = 0x13
     XON                     = 0x11
     XONXOFF_ESCAPE          = 0x12
     XONXOFF_MASK            = 0x10
+
     FCS16TAB = (0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
     0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef,
     0x1231, 0x0210, 0x3273, 0x2252, 0x52b5, 0x4294, 0x72f7, 0x62d6,
@@ -380,6 +381,7 @@ class Serial_RxSnifferThread(threading.Thread):
 
             if self.send_to_parser:
                 self.send_to_parser([ord(c) for c in self.rxBuffer])
+
             if self.rxBuffer[0] == 'P':   #packet from sniffer SERFRAME_MOTE2PC_SNIFFED_PACKET 'P'
                 valid_frame = True
 
@@ -399,10 +401,6 @@ class Serial_RxSnifferThread(threading.Thread):
         # remove mote id at the beginning.
         data = data[2:]
 
-        event_type = 'sniffedPacket'
-
-        # notify a tuple including source as one hop away nodes elide SRC address as can be inferred from MAC layer
-        # header
         return data
 
     def _newByte(self, b):
@@ -440,7 +438,7 @@ class Serial_RxSnifferThread(threading.Thread):
                         # discard valid frame self.hdlc_flag
                         self.hdlc_flag  = False
                         self._newFrame(self.rxBuffer)
-                        self.rxBuffer           = []
+                        self.rxBuffer   = []
 
     def _newFrame(self, frame):
         """
@@ -482,14 +480,14 @@ class Serial_RxSnifferThread(threading.Thread):
         zep += [len(body) + 2]  # length
 
         # mac frame
-        mac = body
+        mac  = [ord(i) for i in body]
         mac += self.calculate_fcs(mac)
         return zep + mac
 
     def calculate_fcs(self,rpayload):
         payload = []
         for b in rpayload:
-            payload += [self.byteinverse(ord(b))]
+            payload += [self.byteinverse(b)]
         crc = 0x0000
         for b in payload:
             crc = ((crc << 8) & 0xffff) ^ self.FCS16TAB[((crc >> 8) ^ b) & 0xff]
