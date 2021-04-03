@@ -19,6 +19,9 @@ import serial
 import ArgusVersion
 import openhdlc
 
+from scapy.compat import raw
+from scapy.layers.inet import UDP
+from scapy.layers.inet6 import IPv6
 
 #============================ helpers =========================================
 
@@ -277,6 +280,10 @@ class Serial_RxSnifferThread(threading.Thread):
     0xef1f, 0xff3e, 0xcf5d, 0xdf7c, 0xaf9b, 0xbfba, 0x8fd9, 0x9ff8,
     0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
     )
+
+    IPV6PREFIX = [0xbb, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    IPV6HOST = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
+
     def __init__(self, txMqttThread, serialport,baudrate):
 
         # store params
@@ -449,9 +456,9 @@ class Serial_RxSnifferThread(threading.Thread):
 
         # transform frame
         frame = self._transformFrame(frame)
+        
         # publish frame
-        #self.txMqttThread.publishFrame(frame)
-        pass
+        self.txMqttThread.publishFrame(frame)
 
     def _transformFrame(self, frame):
         """
@@ -462,8 +469,8 @@ class Serial_RxSnifferThread(threading.Thread):
         frequency = frame[-1]
 
         zep   = self._formatZep(body,frequency)
-        #frame = self._dispatch_mesh_debug_packet(zep)
-        return zep #at the moment
+        frame = self._dispatch_mesh_debug_packet(zep)
+        return frame
 
     def _formatZep (self, body, frequency):
         # ZEP header
@@ -509,7 +516,44 @@ class Serial_RxSnifferThread(threading.Thread):
             rb |= bitval << (7 - pos)
         return rb
 
-#########################################################################################
+    def _dispatch_mesh_debug_packet(self, zep):
+        """
+        Wraps ZEP-based debug packet, for outgoing mesh 6LoWPAN message,  with UDP and IPv6 headers. Then forwards as
+        an event to the Internet interface.
+        """
+
+        udp = UDP(sport=0, dport=17754)
+        udp.add_payload("".join([chr(i) for i in zep]))
+
+        # Common address for source and destination
+        addr = []
+        addr += self.IPV6PREFIX
+        addr += self.IPV6HOST
+        addr = self.format_ipv6_addr(addr)
+
+        # IP
+        ip = IPv6(version=6, tc=0, src=addr, hlim=64, dst=addr)
+        ip = ip / udp
+
+        data = [ord(b) for b in raw(ip)]
+        return data
+
+    def buf2int(self,buf):
+        """
+        Converts some consecutive bytes of a buffer into an integer.
+        Big-endianness is assumed.
+        :param buf: Byte array.
+        """
+        return_val = 0
+        for i in range(len(buf)):
+            return_val += buf[i] << (8 * (len(buf) - i - 1))
+        return return_val
+
+    def format_ipv6_addr(self,addr):
+        # group by 2 bytes
+        addr = [self.buf2int(addr[2 * i:2 * i + 2]) for i in range(len(addr) / 2)]
+        return ':'.join(["%x" % b for b in addr])
+
 class TxMqttThread(threading.Thread):
     """
     Thread which publishes sniffed frames to the MQTT broker.
