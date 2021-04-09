@@ -19,16 +19,11 @@ import serial
 import ArgusVersion
 import openhdlc
 
-from scapy.compat import raw
-from scapy.layers.inet import UDP
-from scapy.layers.inet6 import IPv6
-
 #============================ helpers =========================================
 
 
 def currentUtcTime():
     return time.strftime("%a, %d %b %Y %H:%M:%S UTC", time.gmtime())
-
 
 def logCrash(threadName, err):
     output  = []
@@ -47,7 +42,6 @@ def logCrash(threadName, err):
     print output
 
 #============================ classes =========================================
-
 
 class BeamLogic_RxSnifferThread(threading.Thread):
     """
@@ -281,9 +275,6 @@ class Serial_RxSnifferThread(threading.Thread):
     0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
     )
 
-    IPV6PREFIX = [0xbb, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-    IPV6HOST = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]
-
     def __init__(self, txMqttThread, serialport,baudrate):
 
         # store params
@@ -390,7 +381,8 @@ class Serial_RxSnifferThread(threading.Thread):
                 self.send_to_parser([ord(c) for c in self.rxBuffer])
 
             if self.rxBuffer[0] == 'P':   #packet from sniffer SERFRAME_MOTE2PC_SNIFFED_PACKET 'P'
-                valid_frame = True
+                self.rxBuffer = self.rxBuffer[1:]
+                valid_frame   = True
 
         except openhdlc.HdlcException as err:
             #log.warning('{}: invalid serial frame: {} {}'.format(self.name, format_string_buf(temp_buf), err))
@@ -445,7 +437,6 @@ class Serial_RxSnifferThread(threading.Thread):
                         # discard valid frame self.hdlc_flag
                         self.hdlc_flag  = False
                         self._newFrame(self.rxBuffer)
-                        self.rxBuffer   = []
 
     def _newFrame(self, frame):
         """
