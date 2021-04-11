@@ -285,8 +285,6 @@ class Serial_RxSnifferThread(threading.Thread):
         # local variables
         self.serialHandler           = None
         self.goOn                    = True
-        self.pleaseConnect           = True
-        self.dataLock                = threading.RLock()
 
         # hdlc frame parser object
         self.hdlc                    = openhdlc.OpenHdlc()
@@ -311,51 +309,36 @@ class Serial_RxSnifferThread(threading.Thread):
         time.sleep(1)  # let the banners print
         while self.goOn:
             try:
-                with self.dataLock:
-                    pleaseConnect = self.pleaseConnect
+                # open serial port
+                self.serialHandler = serial.Serial(self.serialport, baudrate=self.baudrate)
 
-                if pleaseConnect:
-                    # open serial port
-                    self.serialHandler = serial.Serial(self.serialport, baudrate=self.baudrate)
-
-                    # read byte
-                    while True:
-                        waitingbytes   = self.serialHandler.inWaiting()
-                        if waitingbytes != 0:
-                            c= self.serialHandler.read(waitingbytes)
-                            for byte in c:
-                               self._newByte(byte)
-                            time.sleep(2)
+                # read byte
+                while True:
+                    waitingbytes   = self.serialHandler.inWaiting()
+                    if waitingbytes != 0:
+                        c= self.serialHandler.read(waitingbytes)
+                        for byte in c:
+                            self._newByte(byte)
+                    time.sleep(2)
 
             except serial.SerialException:
                 # mote disconnected, or pyserialHandler closed
                 # destroy pyserial instance
-                print "WARNING: Could not read from serial at \"{0}\".".format(
-                       self.serialport)
-                print "Is device connected?"
-                self.goOn            = False
+                print "WARNING: Could not read from serial at \"{0}\".".format(self.serialport)
+                self.close()
                 self.serialHandler   = None
                 time.sleep(1)
 
             except Exception as err:
                 logCrash(self.name, err)
+                self.close()
 
     #======================== public ==========================================
 
-    def connectSerialPort(self):
-        with self.dataLock:
-            self.pleaseConnect = True
-
-    def disconnectSerialPort(self):
-        with self.dataLock:
-            self.pleaseConnect = False
-        try:
-            self.serialHandler.close()
-        except:
-            pass
-
     def close(self):
+        print "Is device connected?"
         self.goOn            = False
+
     #======================== public ==========================================
 
     #======================== private =========================================
@@ -381,12 +364,11 @@ class Serial_RxSnifferThread(threading.Thread):
                 self.send_to_parser([ord(c) for c in self.rxBuffer])
 
             if self.rxBuffer[0] == 'P':   #packet from sniffer SERFRAME_MOTE2PC_SNIFFED_PACKET 'P'
-                self.rxBuffer = self.rxBuffer[1:]
+                self.rxBuffer = self.rxBuffer[1:] #removing the indicator byte from the packet
                 valid_frame   = True
 
         except openhdlc.HdlcException as err:
-            #log.warning('{}: invalid serial frame: {} {}'.format(self.name, format_string_buf(temp_buf), err))
-            print 'HDLC Exception'
+            print '{}: Invalid serial frame: {}'.format(self.name,self.rxBuffer)
         return valid_frame
 
     def parse_input(self, data):
@@ -447,7 +429,6 @@ class Serial_RxSnifferThread(threading.Thread):
 
         # transform frame
         frame = self._transformFrame(frame)
-
         # publish frame
         self.txMqttThread.publishFrame(frame)
 
