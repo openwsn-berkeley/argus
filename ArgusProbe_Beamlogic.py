@@ -497,7 +497,6 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
     """
     Thread which attaches to the OpenTestBed and put frames into queue.
     """
-    BASE_TOPIC = 'opentestbed/deviceType/mote/deviceId'
 
     XOFF                    = 0x13
     XON                     = 0x11
@@ -537,19 +536,12 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
     0xef1f, 0xff3e, 0xcf5d, 0xdf7c, 0xaf9b, 0xbfba, 0x8fd9, 0x9ff8,
     0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
     )
-    def __init__(self, txMqttThread, mqtt_broker, testbedmote_eui64):
+    def __init__(self, txMqttThread,portname):
         # store params
-        self.mqtt_broker            = mqtt_broker
-        self.testbedmote_eui64      = testbedmote_eui64
-
         self.txMqttThread            = txMqttThread
+        self._portname = portname
         # local variables
         self.goOn                    = True
-        # mqtt client
-        self.mqtt_client             = mqtt.Client()
-        self.mqtt_client.on_connect  = self._on_mqtt_connect
-        self.mqtt_client.on_message  = self._on_mqtt_message
-        self.mqtt_client.connect(self.mqtt_broker)
 
         # hdlc frame parser object
         self.hdlc                    = openhdlc.OpenHdlc()
@@ -566,7 +558,7 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
 
         # initialize thread
         super(OpenTestBed_RxSnifferThread, self).__init__()
-        self.name                    = 'OpenTestBed_RxSnifferThread@{0}'.format(self.testbedmote_eui64)
+        self.name                    = 'OpenTestBed_RxSnifferThread@{0}'.format(self._portname)
         self.start()
 
     def run(self):
@@ -593,35 +585,9 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
             self.close()
 
     #======================== public ==========================================
-
     def close(self):
         print "Is device connected?"
         self.goOn            = False
-
-    def _rcv_data(self):
-        rx_bytes = self.mqtt_serial_queue.get()
-        return [chr(i) for i in rx_bytes]
-
-    def _attach(self):
-        # create queue for receiving serialbytes messages
-        self.serialbytes_queue = Queue.Queue(maxsize=10)
-        self.mqtt_client.loop_start()
-        self.mqtt_serial_queue = self.serialbytes_queue
-
-    # ==== mqtt callback functions =====================================
-    def _on_mqtt_connect(self, client, userdata, flags, rc):
-        client.subscribe('{}/{}/notif/frommoteserialbytes'.format(self.BASE_TOPIC, self.testbedmote_eui64))
-
-    def _on_mqtt_message(self, client, userdata, message):
-        try:
-            serial_bytes = json.loads(message.payload)['serialbytes']
-        except json.JSONDecodeError:
-            print("failed to parse message payload {}".format(message.payload))
-        else:
-            try:
-                self.serialbytes_queue.put(serial_bytes, block=False)
-            except Queue.Full:
-                print ("queue overflow/full")
 
     #======================== private =========================================
     def _rx_buf_add(self, byte):
@@ -772,6 +738,50 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
             rb |= bitval << (7 - pos)
         return rb
 
+class OpentestbedMoteProbe (OpenTestBed_RxSnifferThread):
+     BASE_TOPIC = 'opentestbed/deviceType/mote/deviceId'
+
+     def __init__(self,txMqttThread, mqtt_broker, testbedmote_eui64):
+        self.mqtt_broker = mqtt_broker
+        self.testbedmote_eui64 = testbedmote_eui64
+
+        # mqtt client
+        self.mqtt_client = mqtt.Client()
+        self.mqtt_client.on_connect = self._on_mqtt_connect
+        self.mqtt_client.on_message = self._on_mqtt_message
+        self.mqtt_client.connect(self.mqtt_broker)
+
+        name = 'opentestbed_{0}'.format(testbedmote_eui64)
+        # initialize the parent class
+        OpenTestBed_RxSnifferThread.__init__(self,txMqttThread, portname=name)
+
+     # ======================== private =================================
+     def _rcv_data(self):
+        rx_bytes = self.mqtt_serial_queue.get()
+        return [chr(i) for i in rx_bytes]
+
+     def _attach(self):
+        # create queue for receiving serialbytes messages
+        self.serialbytes_queue = Queue.Queue(maxsize=100)
+        self.mqtt_client.loop_start()
+        self.mqtt_serial_queue = self.serialbytes_queue
+
+     # ==== mqtt callback functions =====================================
+
+     def _on_mqtt_connect(self, client, userdata, flags, rc):
+        client.subscribe('{}/{}/notif/frommoteserialbytes'.format(self.BASE_TOPIC, self.testbedmote_eui64))
+
+     def _on_mqtt_message(self, client, userdata, message):
+        try:
+            serial_bytes = json.loads(message.payload)['serialbytes']
+        except json.JSONDecodeError:
+            print("failed to parse message payload {}".format(message.payload))
+        else:
+            try:
+                self.serialbytes_queue.put(serial_bytes, block=False)
+            except Queue.Full:
+                print("queue overflow/full")
+
 class TxMqttThread(threading.Thread):
     """
     Thread which publishes sniffed frames to the MQTT broker.
@@ -879,7 +889,8 @@ def main():
     elif args.probetype == "serial":
         serial_rxSnifferThread    = Serial_RxSnifferThread(txMqttThread,args.serialport,args.baudrate)
     elif args.probetype == "opentestbed":
-        testbed_rxSnifferThread   = OpenTestBed_RxSnifferThread(txMqttThread,args.mqtt_broker, args.testbedmote)
+        testbed_rxSnifferThread   = OpentestbedMoteProbe(txMqttThread,args.mqtt_broker,args.testbedmote)
+
     else:
         print('This probe type is not supported!')
         sys.exit()
