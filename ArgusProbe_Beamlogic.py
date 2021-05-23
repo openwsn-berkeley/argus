@@ -12,14 +12,14 @@ import sys
 import threading
 import time
 import traceback
-
+import abc
 import paho.mqtt.publish
 import paho.mqtt.client as mqtt
 import serial
 
 import ArgusVersion
 import openhdlc
-
+from pydispatch import dispatcher 
 #============================ helpers =========================================
 
 
@@ -300,6 +300,9 @@ class Serial_RxSnifferThread(threading.Thread):
         # to be assigned, callback
         self.send_to_parser          = None
 
+        # connect to dispatcher
+        dispatcher.connect(self._send_data, signal='fromMoteConnector@' + self._portname)
+
         # initialize thread
         super(Serial_RxSnifferThread, self).__init__()
         self.name                    = 'Serial_RxSnifferThread@{0}'.format(self.serialport)
@@ -537,6 +540,7 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
     0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
     )
     def __init__(self, txMqttThread,portname):
+        __metaclass__ = abc.ABCMeta
         # store params
         self.txMqttThread            = txMqttThread
         self._portname = portname
@@ -569,7 +573,6 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
             while self.goOn:
                 try:
                     rx_bytes = self._rcv_data()
-                    #print(rx_bytes)
                 except MoteProbeNoData:
                     continue
                 except Exception as err:
@@ -579,7 +582,7 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
                 else:
                     #parse incoming bytes
                     self.parse_bytes(rx_bytes)
-                    time.sleep(4)
+                    #time.sleep(2)
         except Exception as err:
             logCrash(self.name, err)
             self.close()
@@ -590,6 +593,10 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
         self.goOn            = False
 
     #======================== private =========================================
+    @abc.abstractmethod
+    def _rcv_data(self):
+        raise NotImplementedError("Should be implemented by child class")
+
     def _rx_buf_add(self, byte):
         """ Adds byte to buffer and escapes the XONXOFF bytes """
 
@@ -606,7 +613,6 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
         """ Handles a HDLC frame """
         valid_frame = False
         try:
-            #print(self.rxBuffer)
             self.rxBuffer  = self.hdlc.dehdlcify(self.rxBuffer)
 
             if self.send_to_parser:
@@ -678,7 +684,6 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
         frame = self.parse_input(frame)
         # transform frame
         frame = self._transformFrame(frame)
-        print(frame)
         # publish frame
         self.txMqttThread.publishFrame(frame)
 
@@ -738,11 +743,13 @@ class OpenTestBed_RxSnifferThread(threading.Thread):
             rb |= bitval << (7 - pos)
         return rb
 
+### child class
 class OpentestbedMoteProbe (OpenTestBed_RxSnifferThread):
      BASE_TOPIC = 'opentestbed/deviceType/mote/deviceId'
 
      def __init__(self,txMqttThread, mqtt_broker, testbedmote_eui64):
-        self.mqtt_broker = mqtt_broker
+
+        self.mqtt_broker       = mqtt_broker
         self.testbedmote_eui64 = testbedmote_eui64
 
         # mqtt client
